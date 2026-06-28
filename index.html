@@ -23,6 +23,10 @@
           <div class="eyebrow" id="eyebrow">מזווה חכם</div>
           <h1 id="title">המזווה שלך</h1>
         </div>
+        <div class="topbar-tools">
+          <input class="topbar-search" id="topSearch" type="text" placeholder="🔍 חיפוש מוצר…" aria-label="חיפוש מוצר" />
+          <button class="btn topbar-add" id="topAdd">＋ מוצר חדש</button>
+        </div>
         <button class="avatar" id="avatar" aria-label="הגדרות">🏡</button>
       </div>
     </header>
@@ -41,6 +45,22 @@
       <button class="tab" data-tab="pantry"><span class="ico">🥫</span>מזווה</button>
       <button class="tab" data-tab="insights"><span class="ico">📊</span>חיסכון</button>
     </nav>
+
+    <!-- Desktop-only sidebar (hidden < 1024px) -->
+    <aside class="sidebar" id="sidebar" aria-label="ניווט">
+      <div class="sidebar-brand"><span class="sb-logo">🛒</span><span>מזווה חכם</span></div>
+      <nav class="sidebar-nav">
+        <button class="snav active" data-tab="home"><span class="ico">🏡</span><span class="lbl">בית</span></button>
+        <button class="snav" data-tab="list"><span class="ico">🛒</span><span class="lbl">רשימת קניות</span><span class="snav-badge" id="snavListBadge" hidden></span></button>
+        <button class="snav" data-tab="pantry"><span class="ico">🥫</span><span class="lbl">המזווה</span></button>
+        <button class="snav" data-tab="insights"><span class="ico">📊</span><span class="lbl">חיסכון ומחירים</span></button>
+        <button class="snav" data-settings><span class="ico">⚙️</span><span class="lbl">הגדרות</span></button>
+      </nav>
+      <button class="sidebar-sync" id="sidebarSync" data-settings>
+        <span class="ss-ic">☁️</span>
+        <span class="ss-txt"><span class="ss-h" id="syncTitle">סנכרון מקומי</span><span class="ss-s" id="syncSub">לחצו להגדרת סנכרון בית</span></span>
+      </button>
+    </aside>
   </div>
 
   <!-- Full-screen shopping mode (not a tab) -->

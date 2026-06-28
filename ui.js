@@ -90,25 +90,32 @@
          <div class="empty" style="padding:30px 10px"><div class="big">🎉</div><div class="t">הכול מלא — אין מה לקנות כרגע</div></div>`;
 
     $('#view-home').innerHTML = `
-      <div class="gauge-card">
-        ${gaugeSvg(pct)}
-        <div class="gauge-info">
-          <div class="title">${title}</div>
-          <div class="desc">${desc}</div>
-          <div class="trend">📈 ${s.neededCount} ברשימה</div>
+      <div class="home-grid">
+        <div class="home-main">
+          <div class="gauge-card">
+            ${gaugeSvg(pct)}
+            <div class="gauge-info">
+              <div class="title">${title}</div>
+              <div class="desc">${desc}</div>
+              <div class="trend">📈 ${s.neededCount} ברשימה</div>
+            </div>
+          </div>
+          <div class="stat-chips">
+            <div class="stat-chip"><div class="n c-out">${s.out}</div><div class="t">נגמרו</div></div>
+            <div class="stat-chip"><div class="n c-low">${s.low}</div><div class="t">עומדים להיגמר</div></div>
+            <div class="stat-chip"><div class="n c-exp">${s.expiring}</div><div class="t">לקראת תפוגה</div></div>
+          </div>
+          <div class="savings-banner" data-go="insights">
+            <div class="ic">💰</div>
+            <div><div class="lbl">חסכת החודש</div><div class="amt">${savAmt}</div></div>
+            <div class="go">${savGo}</div>
+          </div>
         </div>
-      </div>
-      <div class="stat-chips">
-        <div class="stat-chip"><div class="n c-out">${s.out}</div><div class="t">נגמרו</div></div>
-        <div class="stat-chip"><div class="n c-low">${s.low}</div><div class="t">עומדים להיגמר</div></div>
-        <div class="stat-chip"><div class="n c-exp">${s.expiring}</div><div class="t">לקראת תפוגה</div></div>
-      </div>
-      <div class="savings-banner" data-go="insights">
-        <div class="ic">💰</div>
-        <div><div class="lbl">חסכת החודש</div><div class="amt">${savAmt}</div></div>
-        <div class="go">${savGo}</div>
-      </div>
-      ${previewBlock}`;
+        <div class="home-side">
+          ${previewBlock}
+          <button class="btn home-side-cta" data-go="list">לרשימה המלאה →</button>
+        </div>
+      </div>`;
   }
 
   // ---------- view: SHOPPING LIST ----------
@@ -410,7 +417,7 @@
     if (!VIEWS.includes(name)) return;
     tab = name;
     setHeader(name);
-    document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === name));
+    document.querySelectorAll('[data-tab]').forEach((t) => t.classList.toggle('active', t.dataset.tab === name));
     VIEWS.forEach((v) => { $('#view-' + v).hidden = (v !== name); });
     $('#content').scrollTop = 0;
     renderActive();
@@ -421,6 +428,17 @@
     else if (tab === 'pantry') renderPantry();
     else if (tab === 'insights') renderInsights();
     if (!$('#shopmode').hidden) renderShop();
+    updateChrome();
+  }
+  // desktop sidebar: list badge + sync-card status (kept honest)
+  function updateChrome() {
+    const n = SP.summary().neededCount;
+    const badge = $('#snavListBadge');
+    if (badge) { if (n > 0) { badge.textContent = n; badge.hidden = false; } else badge.hidden = true; }
+    const on = !!window.SP_cloudSave;
+    const st = $('#syncTitle'), su = $('#syncSub');
+    if (st) st.textContent = on ? 'סנכרון בית פעיל' : 'סנכרון מקומי';
+    if (su) su.textContent = on ? 'מחובר — מסונכרן בזמן אמת' : 'לחצו להגדרת סנכרון בית';
   }
 
   // ---------- events ----------
@@ -429,8 +447,8 @@
 
     const tabBtn = t.closest('[data-tab]');
     if (tabBtn) { switchTab(tabBtn.dataset.tab); return; }
-    if (t.closest('#fab')) { addSheet(); return; }
-    if (t.closest('#avatar')) { settingsSheet(); return; }
+    if (t.closest('#fab') || t.closest('#topAdd')) { addSheet(); return; }
+    if (t.closest('#avatar') || t.closest('[data-settings]')) { settingsSheet(); return; }
     if (t === $('#backdrop')) { closeSheet(); return; }
 
     const go = t.closest('[data-go]');
@@ -498,6 +516,11 @@
   // pantry search (input delegation)
   document.addEventListener('input', (e) => {
     if (e.target.id === 'search') { pf.search = e.target.value; renderPantry(); }
+    else if (e.target.id === 'topSearch') {
+      pf.search = e.target.value;
+      if (tab !== 'pantry') switchTab('pantry'); else renderPantry();
+      const s = $('#search'); if (s) s.value = e.target.value; // keep in-view search in sync
+    }
   });
 
   // header shadow on scroll
