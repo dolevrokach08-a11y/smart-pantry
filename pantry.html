@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>מזווה חכם — המזווה</title>
+  <link rel="stylesheet" href="shared-theme.css" />
+</head>
+<body>
+  <header class="page-hero">
+    <div class="wrap">
+      <h1>🥫 המזווה</h1>
+      <p>מה יש בבית, כמה, ומתי להזמין עוד</p>
+      <nav class="nav">
+        <a href="index.html">רשימת קניות</a>
+        <a href="pantry.html" class="active">המזווה</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <div class="card">
+      <h2>➕ הוספת מוצר</h2>
+      <div class="row">
+        <div class="field" style="flex:2"><label>שם</label><input type="text" id="f-name" placeholder="למשל: יוגורט" /></div>
+        <div class="field"><label>קטגוריה</label><select id="f-cat"></select></div>
+        <div class="field"><label>יחידה</label><select id="f-unit"></select></div>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <div class="field"><label>כמות נוכחית</label><input type="number" id="f-qty" value="1" min="0" step="0.5" /></div>
+        <div class="field"><label>סף מינימום</label><input type="number" id="f-min" value="1" min="0" step="0.5" /></div>
+        <div class="field"><label>תפוגה (לא חובה)</label><input type="date" id="f-exp" /></div>
+        <div class="field"><label>ברקוד (לא חובה)</label><input type="text" id="f-barcode" placeholder="למחירים" /></div>
+        <div class="field" style="flex:0 0 auto"><label>&nbsp;</label>
+          <label style="display:flex;gap:6px;align-items:center;font-size:13px;color:var(--text)">
+            <input type="checkbox" id="f-staple" style="width:auto" /> קבוע
+          </label>
+        </div>
+        <div class="field" style="flex:0 0 auto"><label>&nbsp;</label><button class="btn" id="addBtn">הוסף</button></div>
+      </div>
+    </div>
+
+    <div class="toolbar">
+      <input type="text" id="search" placeholder="🔍 חיפוש מוצר..." />
+      <select id="catFilter"><option value="">כל הקטגוריות</option></select>
+      <span class="chip-toggle" id="lowOnly">רק מה שחסר</span>
+      <span class="muted" id="countLbl" style="margin-inline-start:auto"></span>
+    </div>
+
+    <div id="items"></div>
+  </main>
+
+  <div id="toast" class="toast"></div>
+
+  <script src="app.js"></script>
+  <script>
+    const $ = (s) => document.querySelector(s);
+    let toastTimer;
+    function toast(msg) {
+      const t = $('#toast'); t.textContent = msg; t.classList.add('show');
+      clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 1800);
+    }
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    }
+
+    // populate selects
+    function fillSelect(el, arr, addAll) {
+      el.innerHTML = (addAll ? '<option value="">הכול</option>' : '') +
+        arr.map((c) => `<option value="${c}">${c}</option>`).join('');
+    }
+    fillSelect($('#f-cat'), SP.CATEGORIES);
+    fillSelect($('#f-unit'), SP.UNITS);
+    $('#catFilter').innerHTML = '<option value="">כל הקטגוריות</option>' +
+      SP.CATEGORIES.map((c) => `<option value="${c}">${c}</option>`).join('');
+
+    const ui = { search: '', cat: '', lowOnly: false };
+
+    function statusBadge(it) {
+      const s = SP.status(it);
+      if (s === 'out') return '<span class="badge out">נגמר</span>';
+      if (s === 'low') return '<span class="badge low">עומד להיגמר</span>';
+      return '';
+    }
+    function metaBadges(it) {
+      let b = '';
+      if (it.isStaple) b += ' <span class="badge staple">קבוע</span>';
+      if (SP.isExpiringSoon(it)) {
+        const d = SP.daysToExpiry(it);
+        b += ` <span class="badge expiry">⏳ ${d <= 0 ? 'פג תוקף' : 'תפוגה בעוד ' + d + ' ימים'}</span>`;
+      }
+      const pd = SP.predictedDaysLeft(it);
+      if (pd != null && pd <= 7) b += ` <span class="badge predict">צפוי להיגמר בעוד ~${Math.max(0, pd)} ימים</span>`;
+      if (it.promo) b += ' <span class="badge promo">במבצע</span>';
+      return b;
+    }
+
+    function render() {
+      let items = SP.getItems();
+      const all = items.length;
+      if (ui.search) {
+        const q = ui.search.trim();
+        items = items.filter((i) => i.name.includes(q));
+      }
+      if (ui.cat) items = items.filter((i) => i.category === ui.cat);
+      if (ui.lowOnly) items = items.filter((i) => SP.isNeeded(i));
+
+      $('#countLbl').textContent = `${items.length} מתוך ${all} מוצרים`;
+      $('#lowOnly').classList.toggle('on', ui.lowOnly);
+
+      if (!items.length) {
+        $('#items').innerHTML = '<div class="card"><div class="empty">אין מוצרים להצגה.</div></div>';
+        return;
+      }
+
+      // group by category in store-route order
+      const byCat = {};
+      items.forEach((it) => { (byCat[it.category] = byCat[it.category] || []).push(it); });
+      $('#items').innerHTML = SP.CATEGORIES.filter((c) => byCat[c]).map((c) => `
+        <div class="card">
+          <h2>${c} <span class="count">(${byCat[c].length})</span></h2>
+          ${byCat[c].map(rowHtml).join('')}
+        </div>`).join('');
+    }
+
+    function rowHtml(it) {
+      return `
+        <div class="item-row" data-id="${it.id}">
+          <div class="item-main">
+            <div class="item-name">${escapeHtml(it.name)} ${statusBadge(it)}${metaBadges(it)}</div>
+            <div class="item-meta">
+              <span>סף: ${it.minThreshold} ${it.unit}</span>
+              ${it.barcode ? '<span>ברקוד: ' + escapeHtml(it.barcode) + '</span>' : ''}
+            </div>
+          </div>
+          <div class="qty-ctrl">
+            <button data-dec="${it.id}">−</button>
+            <span class="val">${it.currentQty}</span>
+            <button data-inc="${it.id}">+</button>
+          </div>
+          <button class="btn sm ghost" data-edit="${it.id}">ערוך</button>
+          <button class="btn sm danger" data-del="${it.id}">מחק</button>
+        </div>
+        <div class="edit-panel" id="edit-${it.id}" style="display:none"></div>`;
+    }
+
+    function editPanel(it) {
+      return `
+        <div class="card" style="background:var(--card-2);margin:0 0 8px">
+          <div class="row">
+            <div class="field" style="flex:2"><label>שם</label><input type="text" id="e-name-${it.id}" value="${escapeHtml(it.name)}" /></div>
+            <div class="field"><label>קטגוריה</label><select id="e-cat-${it.id}">${SP.CATEGORIES.map((c) => `<option ${c === it.category ? 'selected' : ''}>${c}</option>`).join('')}</select></div>
+            <div class="field"><label>יחידה</label><select id="e-unit-${it.id}">${SP.UNITS.map((u) => `<option ${u === it.unit ? 'selected' : ''}>${u}</option>`).join('')}</select></div>
+          </div>
+          <div class="row" style="margin-top:10px">
+            <div class="field"><label>כמות</label><input type="number" id="e-qty-${it.id}" value="${it.currentQty}" min="0" step="0.5" /></div>
+            <div class="field"><label>סף מינימום</label><input type="number" id="e-min-${it.id}" value="${it.minThreshold}" min="0" step="0.5" /></div>
+            <div class="field"><label>תפוגה</label><input type="date" id="e-exp-${it.id}" value="${it.expiryDate ? it.expiryDate.slice(0,10) : ''}" /></div>
+            <div class="field"><label>ברקוד</label><input type="text" id="e-barcode-${it.id}" value="${escapeHtml(it.barcode || '')}" /></div>
+            <div class="field" style="flex:0 0 auto"><label>&nbsp;</label>
+              <label style="display:flex;gap:6px;align-items:center;font-size:13px;color:var(--text)">
+                <input type="checkbox" id="e-staple-${it.id}" ${it.isStaple ? 'checked' : ''} style="width:auto" /> קבוע
+              </label>
+            </div>
+            <div class="field" style="flex:0 0 auto"><label>&nbsp;</label><button class="btn sm" data-save="${it.id}">שמור</button></div>
+          </div>
+        </div>`;
+    }
+
+    $('#addBtn').addEventListener('click', () => {
+      const name = $('#f-name').value.trim();
+      if (!name) { toast('צריך שם מוצר'); return; }
+      SP.addItem({
+        name, category: $('#f-cat').value, unit: $('#f-unit').value,
+        currentQty: $('#f-qty').value, minThreshold: $('#f-min').value,
+        expiryDate: $('#f-exp').value || null, barcode: $('#f-barcode').value,
+        isStaple: $('#f-staple').checked,
+      });
+      $('#f-name').value = ''; $('#f-qty').value = '1'; $('#f-min').value = '1';
+      $('#f-exp').value = ''; $('#f-barcode').value = ''; $('#f-staple').checked = false;
+      toast(`נוסף: ${name}`);
+    });
+
+    $('#search').addEventListener('input', (e) => { ui.search = e.target.value; render(); });
+    $('#catFilter').addEventListener('change', (e) => { ui.cat = e.target.value; render(); });
+    $('#lowOnly').addEventListener('click', () => { ui.lowOnly = !ui.lowOnly; render(); });
+
+    document.addEventListener('click', (e) => {
+      const inc = e.target.closest('[data-inc]');
+      const dec = e.target.closest('[data-dec]');
+      const del = e.target.closest('[data-del]');
+      const edit = e.target.closest('[data-edit]');
+      const save = e.target.closest('[data-save]');
+      if (inc) SP.adjustQty(inc.dataset.inc, 1);
+      if (dec) SP.adjustQty(dec.dataset.dec, -1);
+      if (del) {
+        const it = SP.getItem(del.dataset.del);
+        if (confirm(`למחוק את "${it ? it.name : ''}"?`)) { SP.removeItem(del.dataset.del); toast('נמחק'); }
+      }
+      if (edit) {
+        const panel = $(`#edit-${edit.dataset.edit}`);
+        if (!panel) return;
+        if (panel.style.display === 'none') {
+          panel.innerHTML = editPanel(SP.getItem(edit.dataset.edit));
+          panel.style.display = '';
+        } else { panel.style.display = 'none'; panel.innerHTML = ''; }
+      }
+      if (save) {
+        const id = save.dataset.save;
+        SP.updateItem(id, {
+          name: $(`#e-name-${id}`).value.trim(),
+          category: $(`#e-cat-${id}`).value,
+          unit: $(`#e-unit-${id}`).value,
+          currentQty: parseFloat($(`#e-qty-${id}`).value) || 0,
+          minThreshold: parseFloat($(`#e-min-${id}`).value) || 0,
+          expiryDate: $(`#e-exp-${id}`).value || null,
+          barcode: $(`#e-barcode-${id}`).value.trim(),
+          isStaple: $(`#e-staple-${id}`).checked,
+        });
+        toast('נשמר');
+      }
+    });
+
+    SP.load();
+    SP.onChange(render);
+    render();
+  </script>
+  <script type="module" src="firebase-sync.js"></script>
+</body>
+</html>
