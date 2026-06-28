@@ -1,0 +1,15 @@
+{
+  "name": "מזווה חכם",
+  "short_name": "מזווה",
+  "lang": "he",
+  "dir": "rtl",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#eef0f3",
+  "theme_color": "#10b981",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

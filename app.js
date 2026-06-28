@@ -26,6 +26,32 @@
 
   const UNITS = ['יחידות', 'ק"ג', 'גרם', 'ליטר', 'מ"ל', 'חבילות', 'בקבוקים'];
 
+  const CAT_EMOJI = {
+    'ירקות ופירות': '🥬',
+    'מקרר (חלב, ביצים, גבינות)': '🥛',
+    'בשר ודגים': '🥩',
+    'קפואים': '🧊',
+    'יבשים ושימורים': '🥫',
+    'מאפים ולחם': '🍞',
+    'חטיפים ומתוקים': '🍫',
+    'משקאות': '🧃',
+    'ניקיון': '🧼',
+    'טואלטיקה': '🧻',
+    'אחר': '🛒',
+  };
+  // A few common items get their own icon; otherwise fall back to category.
+  const NAME_EMOJI = [
+    [/חלב/, '🥛'], [/ביצ/, '🥚'], [/לחם|פיתה/, '🍞'], [/עגבני/, '🍅'],
+    [/מלפפון/, '🥒'], [/בננה/, '🍌'], [/תפוח/, '🍎'], [/גזר/, '🥕'],
+    [/קפה/, '☕'], [/שמן/, '🫒'], [/אורז/, '🍚'], [/פסטה|מקרונ/, '🍝'],
+    [/עוף|בשר/, '🍗'], [/דג/, '🐟'], [/גבינ/, '🧀'], [/יוגורט/, '🥣'],
+    [/נייר טואלט/, '🧻'], [/סבון/, '🧼'], [/שוקולד/, '🍫'], [/מים/, '💧'],
+  ];
+  function itemEmoji(it) {
+    for (const [re, e] of NAME_EMOJI) if (re.test(it.name)) return e;
+    return CAT_EMOJI[it.category] || '🛒';
+  }
+
   // Behavioral nudges surfaced contextually (from shopping-research).
   const TIPS = [
     { emoji: '🛒', text: 'עשו קנייה אחת מרוכזת בשבוע במקום הרבה קפיצות — פחות קניות אימפולסיביות.' },
@@ -250,7 +276,7 @@
 
   // ---------- public API ----------
   global.SP = {
-    CATEGORIES, UNITS, TIPS,
+    CATEGORIES, UNITS, TIPS, CAT_EMOJI, itemEmoji,
     load, persist, onChange, replaceState,
     getItems, getItem, addItem, updateItem, removeItem,
     markPurchased, toggleNeeded, adjustQty,
