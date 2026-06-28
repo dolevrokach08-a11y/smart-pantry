@@ -280,8 +280,17 @@
     if (tab === 'menu') renderMenu();
   });
 
+  // ---------- deep links (#list / #pantry / #menu / #add) ----------
+  function applyHash() {
+    const h = (location.hash || '').replace('#', '');
+    if (h === 'add') { switchTab('pantry'); addSheet(); }
+    else if (['list', 'pantry', 'menu'].includes(h)) switchTab(h);
+  }
+  window.addEventListener('hashchange', applyHash);
+
   // ---------- boot ----------
   SP.load();
   SP.onChange(() => renderActive());
   switchTab('list');
+  applyHash();
 })();

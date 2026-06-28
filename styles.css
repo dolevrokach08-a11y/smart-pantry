@@ -28,7 +28,7 @@
 }
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-html, body { margin: 0; padding: 0; height: 100%; }
+html, body { margin: 0; padding: 0; height: 100%; width: 100%; overflow-x: hidden; }
 body {
   background: var(--bg);
   color: var(--text);
@@ -41,6 +41,7 @@ a { color: var(--accent); text-decoration: none; }
 
 /* ---- App shell: phone-sized frame, centered on desktop ---- */
 .app {
+  width: 100%;
   max-width: 480px;
   margin: 0 auto;
   min-height: 100%;
