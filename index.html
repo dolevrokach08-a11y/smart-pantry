@@ -3,35 +3,48 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="theme-color" content="#eef0f3" />
+  <meta name="theme-color" content="#FBF6EC" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
   <meta name="apple-mobile-web-app-title" content="מזווה חכם" />
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="apple-touch-icon" href="icon.svg" />
   <title>מזווה חכם</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;600;700;800;900&family=Assistant:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
   <div class="app">
     <header class="app-header" id="header">
-      <div class="eyebrow" id="eyebrow">מזווה חכם</div>
-      <h1 id="title">רשימת קניות</h1>
+      <div class="header-row">
+        <div class="header-text">
+          <div class="eyebrow" id="eyebrow">מזווה חכם</div>
+          <h1 id="title">המזווה שלך</h1>
+        </div>
+        <button class="avatar" id="avatar" aria-label="הגדרות">🏡</button>
+      </div>
     </header>
 
     <main class="content" id="content">
-      <section class="view" id="view-list"></section>
+      <section class="view" id="view-home"></section>
+      <section class="view" id="view-list" hidden></section>
       <section class="view" id="view-pantry" hidden></section>
-      <section class="view" id="view-menu" hidden></section>
+      <section class="view" id="view-insights" hidden></section>
     </main>
 
     <nav class="tabbar">
-      <button class="tab active" data-tab="list"><span class="ico">🛒</span>רשימה</button>
-      <button class="tab" data-tab="pantry"><span class="ico">🥫</span>מזווה</button>
+      <button class="tab active" data-tab="home"><span class="ico">🏡</span>בית</button>
+      <button class="tab" data-tab="list"><span class="ico">🛒</span>רשימה</button>
       <div class="fab-slot"><button class="fab" id="fab" aria-label="הוסף מוצר">＋</button></div>
-      <button class="tab" data-tab="menu"><span class="ico">☰</span>עוד</button>
+      <button class="tab" data-tab="pantry"><span class="ico">🥫</span>מזווה</button>
+      <button class="tab" data-tab="insights"><span class="ico">📊</span>חיסכון</button>
     </nav>
   </div>
+
+  <!-- Full-screen shopping mode (not a tab) -->
+  <div class="shopmode" id="shopmode" hidden></div>
 
   <div class="sheet-backdrop" id="backdrop"></div>
   <div class="sheet" id="sheet"></div>

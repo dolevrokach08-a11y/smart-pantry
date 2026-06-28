@@ -1,9 +1,9 @@
 /* Smart Pantry service worker — network-first to avoid stale code,
  * cache fallback for offline. Bump CACHE to force a refresh. */
-const CACHE = 'smart-pantry-v1';
+const CACHE = 'smart-pantry-v2';
 const ASSETS = [
   './', './index.html', './styles.css', './app.js', './ui.js',
-  './manifest.webmanifest', './icon.svg',
+  './manifest.webmanifest', './icon.svg', './landing.html',
 ];
 
 self.addEventListener('install', (e) => {

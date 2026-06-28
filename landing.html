@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#23A85F" />
+  <title>מזווה חכם — הרשימה שכותבת את עצמה</title>
+  <meta name="description" content="מזווה חכם יודע מה יש בבית, לומד את קצב הצריכה, ומכין לבד את רשימת הקניות — ממוינת לפי מסלול הסופר ועם המבצעים הכי משתלמים. PWA חינמי, עובד בנייד ובמחשב." />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="icon.svg" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;600;700;800;900&family=Assistant:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg:#FBF6EC; --ink:#1C1B17; --dim:#8A857A; --faint:#A39D8E; --border:#ECE6D6;
+      --accent:#23A85F; --accent-deep:#15793F; --accent-soft:#E4F4E8;
+      --pop:#FF7A3D; --pop2:#FF9B4A; --sun:#FFC53D;
+      --out:#EF4B4B; --out-soft:#FCE2E2; --low:#F5A623; --low-soft:#FFEFC2; --low-text:#B4790A;
+      --expiry:#E0518A; --expiry-soft:#FBE0EC;
+      --head:'Rubik',system-ui,sans-serif; --body:'Assistant',system-ui,sans-serif;
+    }
+    * { box-sizing:border-box; }
+    html,body { margin:0; padding:0; }
+    body { background:var(--bg); color:var(--ink); font-family:var(--body); font-weight:500; direction:rtl; -webkit-font-smoothing:antialiased; overflow-x:hidden; }
+    h1,h2,h3 { font-family:var(--head); margin:0; }
+    a { text-decoration:none; color:inherit; }
+    .wrap { max-width:1200px; margin:0 auto; }
+    .btn { border:none; cursor:pointer; font-family:var(--head); font-weight:800; border-radius:16px; }
+    @keyframes floaty { 0%,100% { transform:translateY(0) rotate(var(--r,0deg)); } 50% { transform:translateY(-10px) rotate(var(--r,0deg)); } }
+    @keyframes gaugeFill { from { stroke-dashoffset:691; } to { stroke-dashoffset:152; } }
+    @media (prefers-reduced-motion: reduce) { * { animation:none !important; } }
+
+    /* HERO */
+    .hero { position:relative; background:linear-gradient(160deg,#23A85F 0%,#1b8f4f 55%,#136b39 100%); overflow:hidden; }
+    .hero::before { content:''; position:absolute; inset:0; opacity:.5; background:radial-gradient(circle at 20% 15%, rgba(255,255,255,.18), transparent 40%), radial-gradient(circle at 88% 70%, rgba(255,197,61,.25), transparent 45%); }
+    .hero .wrap { position:relative; padding:0 32px 70px; }
+    nav { display:flex; align-items:center; justify-content:space-between; padding:24px 0; color:#fff; }
+    .logo { display:flex; align-items:center; gap:11px; font:800 21px var(--head); }
+    .navlinks { display:flex; align-items:center; gap:28px; font:600 15px var(--body); }
+    .navlinks span { opacity:.9; }
+    .nav-cta { background:#fff; color:var(--accent-deep); padding:11px 20px; font-size:14px; }
+    .hero-grid { display:flex; align-items:center; gap:40px; margin-top:30px; }
+    .hero-text { flex:1; color:#fff; }
+    .pill { display:inline-flex; align-items:center; gap:8px; background:rgba(255,255,255,.16); padding:8px 15px; border-radius:30px; font:700 13px var(--body); margin-bottom:22px; }
+    .hero-text h1 { font:900 58px/1.08 var(--head); letter-spacing:-1.2px; }
+    .hero-text p { margin:22px 0 0; font:500 19px/1.6 var(--body); max-width:440px; color:rgba(255,255,255,.92); }
+    .hero-ctas { display:flex; gap:14px; margin-top:30px; flex-wrap:wrap; }
+    .cta-pop { background:var(--pop); color:#fff; padding:16px 28px; font-size:17px; box-shadow:0 16px 30px -10px rgba(255,122,61,.6); }
+    .cta-ghost { background:rgba(255,255,255,.1); color:#fff; padding:16px 26px; font-size:17px; border:1px solid rgba(255,255,255,.4); }
+    .social { display:flex; gap:26px; margin-top:34px; font:500 14px var(--body); color:rgba(255,255,255,.85); flex-wrap:wrap; }
+    .social b { font-family:var(--head); }
+
+    /* phone mockup */
+    .phone { flex-shrink:0; position:relative; width:300px; }
+    .phone .float { position:absolute; font-size:44px; }
+    .phone .bezel { width:300px; height:610px; background:#15140f; border-radius:46px; padding:11px; box-shadow:0 40px 70px -20px rgba(0,0,0,.45); }
+    .phone .screen { width:100%; height:100%; background:var(--bg); border-radius:36px; overflow:hidden; display:flex; flex-direction:column; }
+    .ph-greet { padding:22px 20px 10px; }
+    .ph-greet .g { font:600 12px var(--body); color:var(--faint); }
+    .ph-greet .t { font:800 20px var(--head); }
+    .ph-card { margin:6px 16px; background:#fff; border-radius:22px; padding:18px; box-shadow:0 12px 26px -16px rgba(28,27,23,.3); display:flex; align-items:center; gap:14px; }
+    .ph-gauge { position:relative; width:92px; height:92px; flex-shrink:0; }
+    .ph-gauge svg { width:92px; height:92px; transform:rotate(-90deg); }
+    .ph-gauge .c { position:absolute; inset:0; display:grid; place-items:center; font:900 24px var(--head); }
+    .ph-save { margin:8px 16px 0; background:linear-gradient(135deg,var(--pop),var(--pop2)); border-radius:18px; padding:13px 16px; color:#fff; display:flex; align-items:center; gap:10px; }
+    .ph-rows { margin:12px 16px 0; display:flex; flex-direction:column; gap:8px; }
+    .ph-row { background:#fff; border-radius:14px; padding:9px 11px; display:flex; align-items:center; gap:9px; box-shadow:0 6px 14px -10px rgba(28,27,23,.3); }
+    .ph-em { width:32px; height:32px; border-radius:10px; display:grid; place-items:center; font-size:17px; }
+    .ph-badge { font:800 9px var(--head); padding:3px 7px; border-radius:12px; margin-inline-start:auto; }
+
+    /* STATS STRIP */
+    .stats { display:flex; background:#1C1B17; padding:34px 32px; gap:20px; }
+    .stats .wrap { display:flex; gap:20px; width:100%; }
+    .stat { flex:1; text-align:center; color:#fff; }
+    .stat .n { font:900 38px var(--head); }
+    .stat .l { font:600 14px var(--body); color:var(--faint); margin-top:4px; }
+    .stat-div { width:1px; background:#34322a; }
+
+    /* SECTIONS */
+    section { padding:72px 32px; }
+    .eyebrow { font:800 14px var(--head); color:var(--pop); letter-spacing:1px; text-align:center; }
+    .sec-title { margin:10px 0 0; font:900 42px var(--head); color:var(--ink); letter-spacing:-.8px; text-align:center; }
+    .features { display:grid; grid-template-columns:repeat(3,1fr); gap:20px; margin-top:40px; }
+    .feat { background:#fff; border-radius:24px; padding:30px; box-shadow:0 16px 36px -24px rgba(28,27,23,.35); }
+    .feat .ic { width:62px; height:62px; border-radius:18px; display:grid; place-items:center; font-size:30px; }
+    .feat h3 { margin:20px 0 8px; font:800 21px var(--head); }
+    .feat p { margin:0; font:500 15px/1.6 var(--body); color:var(--dim); }
+
+    .steps { display:flex; gap:24px; margin-top:44px; }
+    .step { flex:1; text-align:center; }
+    .step .num { width:56px; height:56px; margin:0 auto; border-radius:50%; color:#fff; display:grid; place-items:center; font:900 24px var(--head); }
+    .step h3 { margin:18px 0 8px; font:800 19px var(--head); }
+    .step p { margin:0; font:500 14.5px/1.55 var(--body); color:var(--dim); }
+
+    .final { margin:30px 32px 56px; background:linear-gradient(150deg,var(--accent),var(--accent-deep)); border-radius:32px; padding:60px; text-align:center; position:relative; overflow:hidden; }
+    .final .f { position:absolute; font-size:58px; opacity:.18; }
+    .final h2 { font:900 40px var(--head); color:#fff; letter-spacing:-.8px; }
+    .final p { margin:14px auto 0; font:500 18px var(--body); color:rgba(255,255,255,.9); max-width:440px; }
+    .final .btn { margin-top:28px; background:#fff; color:var(--accent-deep); padding:17px 36px; font-size:18px; box-shadow:0 18px 36px -12px rgba(0,0,0,.3); }
+
+    footer { background:#1C1B17; padding:30px 32px; }
+    footer .wrap { display:flex; align-items:center; justify-content:space-between; }
+    footer .logo { color:#fff; font-size:16px; }
+    footer .cp { font:500 13px var(--body); color:#7d786c; }
+
+    /* responsive */
+    @media (max-width: 860px) {
+      .navlinks span { display:none; }
+      .hero-grid { flex-direction:column; gap:30px; }
+      .hero-text h1 { font-size:42px; }
+      .hero-text p { font-size:17px; max-width:none; }
+      .stats .wrap { flex-wrap:wrap; }
+      .stat { flex:1 1 40%; }
+      .stat-div { display:none; }
+      .features { grid-template-columns:1fr; }
+      .steps { flex-direction:column; }
+      .sec-title { font-size:30px; }
+      .final { padding:40px 24px; }
+      .final h2 { font-size:30px; }
+      section { padding:50px 24px; }
+    }
+  </style>
+</head>
+<body>
+  <!-- HERO -->
+  <header class="hero">
+    <div class="wrap">
+      <nav>
+        <div class="logo"><span style="font-size:26px">🛒</span><span>מזווה חכם</span></div>
+        <div class="navlinks">
+          <span>איך זה עובד</span><span>פיצ׳רים</span><span>חיסכון</span>
+          <a href="index.html"><button class="btn nav-cta">התקנה חינם</button></a>
+        </div>
+      </nav>
+      <div class="hero-grid">
+        <div class="hero-text">
+          <div class="pill">✨ PWA · עובד בנייד ובמחשב, גם אופליין</div>
+          <h1>הרשימה<br>שכותבת<br>את עצמה.</h1>
+          <p>מזווה חכם יודע מה יש בבית, לומד את קצב הצריכה, ומכין לבד את רשימת הקניות — ממוינת לפי מסלול הסופר ועם המבצעים הכי משתלמים.</p>
+          <div class="hero-ctas">
+            <a href="index.html"><button class="btn cta-pop">התחל עכשיו — חינם</button></a>
+            <a href="index.html"><button class="btn cta-ghost">▶ צפה בדמו</button></a>
+          </div>
+          <div class="social">
+            <span>★★★★★ <b>4.9</b></span><span>· ללא פרסומות</span><span>· סנכרון לכל הבית</span>
+          </div>
+        </div>
+        <!-- phone mockup -->
+        <div class="phone">
+          <div class="float" style="left:-30px; top:30px; --r:-12deg; animation:floaty 4s ease-in-out infinite;">🥑</div>
+          <div class="float" style="right:-24px; top:120px; --r:10deg; font-size:40px; animation:floaty 3.5s ease-in-out .4s infinite;">🍅</div>
+          <div class="float" style="left:-20px; bottom:60px; --r:8deg; font-size:38px; animation:floaty 3.8s ease-in-out .2s infinite;">🥕</div>
+          <div class="bezel">
+            <div class="screen">
+              <div class="ph-greet"><div class="g">בוקר טוב ☀️</div><div class="t">המזווה שלך</div></div>
+              <div class="ph-card">
+                <div class="ph-gauge">
+                  <svg viewBox="0 0 260 260"><circle cx="130" cy="130" r="110" fill="none" stroke="#EDE7D7" stroke-width="24"/><circle cx="130" cy="130" r="110" fill="none" stroke="#23A85F" stroke-width="24" stroke-linecap="round" stroke-dasharray="691" stroke-dashoffset="691" style="animation:gaugeFill 1.7s cubic-bezier(.2,.8,.2,1) .5s forwards"/></svg>
+                  <div class="c">78%</div>
+                </div>
+                <div><div style="font:800 15px var(--head)">הבית מלא 👌</div><div style="font:500 12px var(--body); color:var(--dim); margin-top:3px">2 נגמרו · 3 חסרים</div></div>
+              </div>
+              <div class="ph-save"><span style="font-size:22px">💰</span><div><div style="font:600 11px var(--body); opacity:.9">חסכת החודש</div><div style="font:900 18px var(--head)">₪84</div></div></div>
+              <div class="ph-rows">
+                <div class="ph-row"><div class="ph-em" style="background:var(--out-soft)">🥛</div><div style="flex:1; font:700 13px var(--body)">חלב</div><span class="ph-badge" style="background:var(--out-soft); color:var(--out)">נגמר</span></div>
+                <div class="ph-row"><div class="ph-em" style="background:var(--low-soft)">🍞</div><div style="flex:1; font:700 13px var(--body)">לחם</div><span class="ph-badge" style="background:var(--low-soft); color:var(--low-text)">חסר</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- STATS -->
+  <div class="stats">
+    <div class="wrap">
+      <div class="stat"><div class="n" style="color:var(--sun)">₪84</div><div class="l">חיסכון חודשי ממוצע</div></div>
+      <div class="stat-div"></div>
+      <div class="stat"><div class="n" style="color:#23d97a">0 דק׳</div><div class="l">לכתוב רשימה ידנית</div></div>
+      <div class="stat-div"></div>
+      <div class="stat"><div class="n" style="color:var(--pop)">−40%</div><div class="l">פחות אוכל בפח</div></div>
+      <div class="stat-div"></div>
+      <div class="stat"><div class="n">∞</div><div class="l">מכשירים בבית, מסונכרן</div></div>
+    </div>
+  </div>
+
+  <!-- FEATURES -->
+  <section>
+    <div class="wrap">
+      <div class="eyebrow">למה מזווה חכם</div>
+      <h2 class="sec-title">פחות מחשבה. יותר אוכל בבית.</h2>
+      <div class="features">
+        <div class="feat"><div class="ic" style="background:var(--accent-soft)">📝</div><h3>רשימה שנבנית לבד</h3><p>לכל מוצר יש סף מינימום. ברגע שיורדים מתחת אליו — הוא קופץ לרשימה אוטומטית.</p></div>
+        <div class="feat"><div class="ic" style="background:#FFF3D6">🔮</div><h3>חיזוי צריכה</h3><p>המערכת לומדת את קצב הצריכה ומזכירה עוד לפני שנגמר — "צפוי להיגמר בעוד יומיים".</p></div>
+        <div class="feat"><div class="ic" style="background:var(--expiry-soft)">⏳</div><h3>התראות תפוגה</h3><p>"לאכול קודם" על מה שמתקרב לתפוגה — כדי שפחות אוכל ילך לפח.</p></div>
+        <div class="feat"><div class="ic" style="background:#FFE6D6">🔥</div><h3>מחירים ומבצעים</h3><p>משווה מחירים בין הרשתות ומראה איפה משתלם לקנות את מה שחסר לך עכשיו.</p></div>
+        <div class="feat"><div class="ic" style="background:var(--accent-soft)">🧭</div><h3>מסלול סופר חכם</h3><p>הרשימה ממוינת לפי מסלול הסופר — אתם עוברים פעם אחת בלי לחזור אחורה.</p></div>
+        <div class="feat"><div class="ic" style="background:#E0EEF8">☁️</div><h3>סנכרון לכל הבית</h3><p>כל בני הבית רואים את אותה רשימה בזמן אמת — בנייד, בטאבלט ובמחשב.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- HOW IT WORKS -->
+  <section style="padding-top:20px">
+    <div class="wrap">
+      <h2 class="sec-title" style="margin-bottom:0">שלושה צעדים, וזהו.</h2>
+      <div class="steps">
+        <div class="step"><div class="num" style="background:var(--accent)">1</div><h3>הוסיפו את המוצרים</h3><p>פעם אחת — מה שיש בבית והסף לכל פריט. דוגמאות מחכות כבר בפנים.</p></div>
+        <div class="step"><div class="num" style="background:var(--pop)">2</div><h3>חיים את החיים</h3><p>מורידים כמות כשמשתמשים. האפליקציה בונה את הרשימה ברקע בלי שתחשבו על זה.</p></div>
+        <div class="step"><div class="num" style="background:var(--sun); color:var(--ink)">3</div><h3>יוצאים לקנייה</h3><p>מצב קנייה גדול וברור, ממוין למסלול, עם המבצעים — ומסמנים תוך כדי.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- FINAL CTA -->
+  <div class="final">
+    <div class="f" style="right:40px; top:30px; animation:floaty 4s ease-in-out infinite">🥑</div>
+    <div class="f" style="left:50px; bottom:30px; animation:floaty 3.6s ease-in-out .4s infinite">🍅</div>
+    <h2>שהבית ידאג לעצמו.</h2>
+    <p>התקינו חינם תוך 30 שניות — בנייד או במחשב. בלי הרשמה, בלי פרסומות.</p>
+    <a href="index.html"><button class="btn">הוסף למסך הבית →</button></a>
+  </div>
+
+  <!-- FOOTER -->
+  <footer>
+    <div class="wrap">
+      <div class="logo"><span style="font-size:20px">🛒</span><span>מזווה חכם</span></div>
+      <div class="cp">© 2026 · נבנה באהבה למטבח · PWA</div>
+    </div>
+  </footer>
+</body>
+</html>

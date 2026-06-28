@@ -236,14 +236,29 @@
   // ---------- summary / tips ----------
   function summary() {
     const items = state.items;
+    const ok = items.filter((i) => status(i) === 'ok').length;
     return {
       total: items.length,
+      ok,
+      // "How full is the house" — share of tracked items that are above threshold.
+      fullnessPct: items.length ? Math.round((ok / items.length) * 100) : 100,
       out: items.filter((i) => status(i) === 'out').length,
       low: items.filter((i) => status(i) === 'low').length,
       expiring: items.filter((i) => isExpiringSoon(i)).length,
       promos: items.filter((i) => i.promo && isNeeded(i)).length,
       neededCount: items.filter(isNeeded).length,
     };
+  }
+
+  /** Savings & promo view for the insights screen. Real promo data arrives in
+   *  Phase 1b (price XML); until then `amount` is whatever promo items carry. */
+  function savingsSummary() {
+    const promos = state.items.filter((i) => i.promo);
+    let amount = 0;
+    promos.forEach((i) => {
+      if (i.regPrice != null && i.lastPrice != null) amount += Math.max(0, i.regPrice - i.lastPrice);
+    });
+    return { amount: Math.round(amount * 100) / 100, count: promos.length, items: promos };
   }
 
   function contextualTip() {
@@ -281,6 +296,6 @@
     getItems, getItem, addItem, updateItem, removeItem,
     markPurchased, toggleNeeded, adjustQty,
     status, isNeeded, avgDaysBetween, predictedDaysLeft, daysToExpiry, isExpiringSoon,
-    shoppingList, summary, contextualTip,
+    shoppingList, summary, savingsSummary, contextualTip,
   };
 })(window);
