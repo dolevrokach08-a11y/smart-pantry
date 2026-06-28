@@ -1,0 +1,43 @@
+name: Update supermarket prices
+
+# Pulls Shufersal's public price-transparency data and commits prices.json,
+# which the web app merges into items by barcode. No secrets required.
+
+on:
+  schedule:
+    - cron: '0 5,15 * * *'   # ~08:00 & 18:00 Israel time
+  workflow_dispatch:          # allow manual runs from the Actions tab
+
+permissions:
+  contents: write
+
+concurrency:
+  group: prices
+  cancel-in-progress: true
+
+jobs:
+  prices:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Fetch prices
+        env:
+          STORE_ID: ${{ vars.SHUFERSAL_STORE_ID }}   # optional repo variable; blank = first store
+        run: node scripts/fetch-prices.js
+
+      - name: Commit if changed
+        run: |
+          if [[ -n "$(git status --porcelain prices.json)" ]]; then
+            git config user.name  "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add prices.json
+            git commit -m "chore(prices): refresh Shufersal prices [skip ci]"
+            git push
+          else
+            echo "prices.json unchanged — nothing to commit."
+          fi

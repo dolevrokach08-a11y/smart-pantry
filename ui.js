@@ -64,7 +64,11 @@
   }
   function subText(it) {
     let s = `יש: ${it.currentQty} ${esc(it.unit)}`;
-    if (it.promo && it.lastPrice != null) s += ` · <span class="promo-price">₪${it.lastPrice} במבצע</span>`;
+    if (it.lastPrice != null) {
+      s += it.promo
+        ? ` · <span class="promo-price">₪${it.lastPrice} במבצע</span>`
+        : ` · <span class="price-tag">₪${it.lastPrice}</span>`;
+    }
     return s;
   }
 
@@ -250,7 +254,14 @@
         <div class="barchart">${bars}</div>
       </div>
       <div class="row-head"><span class="h">🔥 מבצעים על מה שחסר</span>${promos.length ? `<span class="promo-count">${promos.length}</span>` : ''}</div>
-      ${promoBlock}`;
+      ${promoBlock}
+      ${priceSourceLine()}`;
+  }
+  function priceSourceLine() {
+    const m = SP.priceInfo && SP.priceInfo();
+    if (!m) return '';
+    const when = m.updated ? new Date(m.updated).toLocaleDateString('he-IL') : '';
+    return `<div class="price-source">💲 מחירים מ־<b>${esc(m.chain)}${m.storeName ? ' · ' + esc(m.storeName) : ''}</b>${when ? ' · עודכן ' + when : ''}</div>`;
   }
 
   // ---------- SHOPPING MODE (full-screen) ----------

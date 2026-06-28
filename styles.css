@@ -129,7 +129,10 @@ h1, h2, h3 { font-family: var(--font-head); margin: 0; }
 .item-name { font: 700 15px var(--font-body); color: var(--text); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .item-sub { font: 600 12px var(--font-body); color: var(--text-faint); margin-top: 2px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .item-sub .promo-price { color: var(--pop); font-weight: 800; }
+.item-sub .price-tag { color: var(--accent-deep); font-weight: 800; }
 .item.collected .item-name { text-decoration: line-through; }
+.price-source { text-align: center; font: 600 12px var(--font-body); color: var(--text-faint); margin: 18px 4px 2px; }
+.price-source b { color: var(--text-dim); }
 
 /* ---------- badges ---------- */
 .badge { font: 800 10.5px var(--font-head); padding: 3px 9px; border-radius: 20px; white-space: nowrap; }

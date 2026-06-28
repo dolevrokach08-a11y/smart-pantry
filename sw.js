@@ -1,10 +1,12 @@
 /* Smart Pantry service worker — network-first to avoid stale code,
  * cache fallback for offline. Bump CACHE to force a refresh. */
-const CACHE = 'smart-pantry-v2';
+const CACHE = 'smart-pantry-v3';
 const ASSETS = [
-  './', './index.html', './styles.css', './app.js', './ui.js',
+  './', './index.html', './styles.css', './app.js', './ui.js', './prices.js',
   './manifest.webmanifest', './icon.svg', './landing.html',
 ];
+// prices.json is intentionally NOT precached — it's served network-first so the
+// app always sees the latest supermarket data, with cache as offline fallback.
 
 self.addEventListener('install', (e) => {
   self.skipWaiting();

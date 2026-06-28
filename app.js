@@ -261,6 +261,32 @@
     return { amount: Math.round(amount * 100) / 100, count: promos.length, items: promos };
   }
 
+  // ---------- prices (Phase 1b) ----------
+  // External supermarket prices (prices.json, written by the scheduled Action)
+  // are merged into items by barcode. Kept in memory only — not persisted, so
+  // they refresh on every load and never pollute the user's saved data.
+  let priceMeta = null;
+  function applyPrices(data) {
+    if (!data || !data.prices) return;
+    priceMeta = { chain: data.chain, store: data.store, storeName: data.storeName, updated: data.updated, count: data.count };
+    const P = data.prices, PR = data.promos || {};
+    state.items.forEach((it) => {
+      const bc = (it.barcode || '').trim();
+      if (!bc) return;
+      if (PR[bc]) {
+        it.lastPrice = PR[bc].p;
+        it.regPrice = PR[bc].was != null ? PR[bc].was : (P[bc] != null ? P[bc] : null);
+        it.promo = true;
+      } else if (P[bc] != null) {
+        it.lastPrice = P[bc];
+        it.regPrice = null;
+        it.promo = false;
+      }
+    });
+    emit();
+  }
+  function priceInfo() { return priceMeta; }
+
   function contextualTip() {
     const s = summary();
     if (s.expiring > 0) {
@@ -279,7 +305,9 @@
       id: uid(), name, category, unit, currentQty, minThreshold, isStaple,
       expiryDate: null, barcode: '', neededManual: false, purchases: [], lastPrice: null, promo: false,
     });
-    return [
+    // Three seed items carry real Shufersal barcodes so live prices show
+    // out of the box; the rest are left for the user to fill a barcode on.
+    const items = [
       mk('חלב', 'מקרר (חלב, ביצים, גבינות)', 'ליטר', 1, 2, true),
       mk('ביצים', 'מקרר (חלב, ביצים, גבינות)', 'יחידות', 12, 6, true),
       mk('לחם', 'מאפים ולחם', 'יחידות', 0, 1, true),
@@ -287,6 +315,10 @@
       mk('נייר טואלט', 'טואלטיקה', 'חבילות', 1, 1, true),
       mk('סבון כלים', 'ניקיון', 'בקבוקים', 2, 1, false),
     ];
+    items[0].barcode = '7290000042015'; // חלב 3% מהדרין 1ל
+    items[2].barcode = '7290000002026'; // לחם אחיד 750ג
+    items[5].barcode = '7290020188151'; // נוזל כלים 750מ
+    return items;
   }
 
   // ---------- public API ----------
@@ -297,5 +329,6 @@
     markPurchased, toggleNeeded, adjustQty,
     status, isNeeded, avgDaysBetween, predictedDaysLeft, daysToExpiry, isExpiringSoon,
     shoppingList, summary, savingsSummary, contextualTip,
+    applyPrices, priceInfo,
   };
 })(window);
