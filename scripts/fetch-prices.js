@@ -1,25 +1,24 @@
 #!/usr/bin/env node
-/* ===== Smart Pantry — multi-chain price fetcher (Phase 1c) =====
+/* ===== Smart Pantry — multi-chain, multi-store price fetcher (Phase 1d) =====
  *
- * Pulls per-store price files from several Israeli chains (חוק שקיפות מחירים),
- * keeps only the tracked national barcodes, and writes prices.json:
+ * Builds a full branch directory + per-store prices for the tracked national
+ * barcodes, so the app can let the user pick their branch per chain and compare
+ * the basket at *their* stores. Writes prices.json:
  *
- *   { updated, tracked:[...], chains: { "<name>": { store, prices:{barcode:price} } } }
+ *   { updated, tracked:[...],
+ *     chains: { "<name>": { stores: { "<id>": {name} },
+ *                           prices: { "<id>": { "<barcode>": price } } } } }
  *
- * The app fetches it and, for each item, picks the cheapest chain + compares
- * the whole shopping basket across chains. No Firebase — plain GitHub Pages.
+ * Sources (scripts/chains.json): "shufersal" = public portal; "cerberus" =
+ * publishedprices.co.il login (public creds, empty password).
  *
- * Two source types (scripts/chains.json):
- *   - "shufersal": public portal https://prices.shufersal.co.il (no login)
- *   - "cerberus":  https://url.publishedprices.co.il — login with the public
- *                  credentials the transparency law mandates (empty password).
+ * Env:
+ *   MAX_STORES  cap stores fetched per chain (local testing). Unset = all.
  *
- * Node 18+ (global fetch + zlib), zero npm deps. Runs in GitHub Actions; note
- * that on a Netspark-filtered local machine the publishedprices TLS handshake
- * fails in Node (the CI runner is unaffected) — see scripts/gen-prices-local.ps1.
+ * Node 18+, zero deps. The heavy fetch really runs in CI; locally Netspark
+ * breaks Node TLS to publishedprices (use scripts/gen-prices-local.ps1).
  */
 'use strict';
-
 const zlib = require('node:zlib');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -27,76 +26,111 @@ const path = require('node:path');
 const SHUF = 'https://prices.shufersal.co.il';
 const CERB = 'https://url.publishedprices.co.il';
 const UA = { 'User-Agent': 'Mozilla/5.0 (SmartPantry price fetcher)' };
+const MAX = process.env.MAX_STORES ? parseInt(process.env.MAX_STORES, 10) : Infinity;
+const CONCURRENCY = 8;
 
 const RX = {
   item: /<Item>([\s\S]*?)<\/Item>/g,
   code: /<ItemCode>([\s\S]*?)<\/ItemCode>/,
   price: /<ItemPrice>([\s\S]*?)<\/ItemPrice>/,
-  store: /<StoreI[dD]>([\s\S]*?)<\/StoreI[dD]>/,
+  store: /<Store>([\s\S]*?)<\/Store>/g,
+  sid: /<StoreI[dD]>([\s\S]*?)<\/StoreI[dD]>/,
+  sname: /<StoreName>([\s\S]*?)<\/StoreName>/,
   csrf: /name="csrftoken"\s+content="([^"]+)"/,
 };
 
+const stripBom = (s) => s.replace(/^﻿/, '');
+// Cerberus store files are UTF-16; everything else UTF-8.
+function decode(b) {
+  if (b[0] === 0xff && b[1] === 0xfe) return stripBom(b.toString('utf16le'));
+  return stripBom(b.toString('utf8'));
+}
 function parsePrices(xml, keep) {
   const out = {};
   for (const m of xml.matchAll(RX.item)) {
-    const b = m[1];
-    const code = (b.match(RX.code) || [, ''])[1].trim();
+    const code = (m[1].match(RX.code) || [, ''])[1].trim();
     if (!keep.has(code)) continue;
-    const price = parseFloat((b.match(RX.price) || [, ''])[1]);
-    if (price > 0) out[code] = Math.round(price * 100) / 100;
+    const p = parseFloat((m[1].match(RX.price) || [, ''])[1]);
+    if (p > 0) out[code] = Math.round(p * 100) / 100;
   }
-  const store = (xml.match(RX.store) || [, ''])[1].trim();
-  return { prices: out, store };
+  return out;
 }
-
-async function gunzipUrl(url, headers) {
+function parseStores(xml) {
+  const stores = {};
+  for (const m of xml.matchAll(RX.store)) {
+    const id = (m[1].match(RX.sid) || [, ''])[1].trim().replace(/^0+/, '') || '0';
+    const name = (m[1].match(RX.sname) || [, ''])[1].trim();
+    if (id && name) stores[id] = { name };
+  }
+  return stores;
+}
+async function buf(url, headers) {
   const r = await fetch(url, { headers: { ...UA, ...headers } });
-  if (!r.ok) throw new Error(`GET ${url.slice(0, 60)} -> ${r.status}`);
-  return zlib.gunzipSync(Buffer.from(await r.arrayBuffer())).toString('utf8');
+  if (!r.ok) throw new Error(`${r.status} ${url.slice(0, 50)}`);
+  return Buffer.from(await r.arrayBuffer());
+}
+const gunzip = (b) => zlib.gunzipSync(b).toString('utf8');
+
+/** Run async tasks with limited concurrency. */
+async function pool(items, fn, n = CONCURRENCY) {
+  let i = 0;
+  await Promise.all(Array.from({ length: Math.min(n, items.length) }, async () => {
+    while (i < items.length) { const idx = i++; try { await fn(items[idx]); } catch { /* skip store */ } }
+  }));
 }
 
-/* ---- Shufersal public portal ---- */
-async function fetchShufersal(chain, keep) {
-  const grid = await (await fetch(`${SHUF}/FileObject/UpdateCategory?catID=2&storeId=0`, { headers: UA })).text();
-  const links = [...grid.matchAll(/href="([^"]+PriceFull[^"]+\.gz[^"]*)"/g)].map((m) => m[1].replace(/&amp;/g, '&'));
-  const url = chain.store ? links.find((u) => u.includes(`-${chain.store}-`)) || links[0] : links[0];
-  if (!url) throw new Error('no Shufersal PriceFull link');
-  return parsePrices(await gunzipUrl(url, {}), keep);
+/* ---------- Shufersal (public) ---------- */
+async function shufLink(catID, storeId, kind) {
+  const grid = (await buf(`${SHUF}/FileObject/UpdateCategory?catID=${catID}&storeId=${storeId}`)).toString('utf8');
+  return [...grid.matchAll(/href="([^"]+\.gz[^"]*)"/g)].map((m) => m[1].replace(/&amp;/g, '&')).find((u) => u.includes(kind));
+}
+async function fetchShufersal(keep) {
+  const stores = parseStores(gunzip(await buf(await shufLink(5, 0, 'Stores'))));
+  const ids = Object.keys(stores).slice(0, MAX);
+  const prices = {};
+  await pool(ids, async (id) => {
+    const link = await shufLink(2, id, 'PriceFull');
+    if (!link) return;
+    const got = parsePrices(gunzip(await buf(link)), keep);
+    if (Object.keys(got).length) prices[id] = got;
+  });
+  return { stores, prices };
 }
 
-/* ---- publishedprices.co.il (Cerberus) login + download ---- */
-function cookieJar() {
+/* ---------- publishedprices (Cerberus) ---------- */
+async function cerberusSession(user) {
   const jar = {};
-  return {
-    absorb(res) {
-      const sc = res.headers.getSetCookie ? res.headers.getSetCookie() : [];
-      for (const c of sc) { const [kv] = c.split(';'); const i = kv.indexOf('='); jar[kv.slice(0, i)] = kv.slice(i + 1); }
-    },
-    header() { return Object.entries(jar).map(([k, v]) => `${k}=${v}`).join('; '); },
-  };
+  const cookie = () => Object.entries(jar).map(([k, v]) => `${k}=${v}`).join('; ');
+  const absorb = (r) => (r.headers.getSetCookie ? r.headers.getSetCookie() : []).forEach((c) => { const [kv] = c.split(';'); const i = kv.indexOf('='); jar[kv.slice(0, i)] = kv.slice(i + 1); });
+  const form = (body) => ({ method: 'POST', headers: { ...UA, Cookie: cookie(), 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams(body).toString() });
+  const get = async (u) => { const r = await fetch(u, { headers: { ...UA, Cookie: cookie() } }); absorb(r); return r; };
+  const csrf1 = (RX.csrf.exec(await (await get(`${CERB}/login`)).text()) || [, ''])[1];
+  await fetch(`${CERB}/login/user`, form({ username: user, password: '', csrftoken: csrf1 })).then(absorb);
+  const fileHtml = await (await get(`${CERB}/file`)).text();
+  if (/name="username"/.test(fileHtml)) throw new Error(`login failed: ${user}`);
+  const csrf2 = (RX.csrf.exec(fileHtml) || [, ''])[1];
+  const dir = await fetch(`${CERB}/file/json/dir`, form({ sEcho: 1, iDisplayStart: 0, iDisplayLength: 100000, cd: '/', csrftoken: csrf2 }));
+  const files = (JSON.parse(await dir.text()).aaData || []).map((r) => r.name).filter(Boolean);
+  return { cookie, files };
 }
 async function fetchCerberus(chain, keep) {
-  if (!chain.user) throw new Error('cerberus chain missing user');
-  const jar = cookieJar();
-  const get = async (u) => { const r = await fetch(u, { headers: { ...UA, Cookie: jar.header() } }); jar.absorb(r); return r; };
-  const post = async (u, body) => {
-    const r = await fetch(u, { method: 'POST', headers: { ...UA, Cookie: jar.header(), 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams(body).toString() });
-    jar.absorb(r); return r;
-  };
-  // 1) login page -> csrf, 2) submit login, 3) /file -> fresh csrf
-  const csrf1 = (RX.csrf.exec(await (await get(`${CERB}/login`)).text()) || [, ''])[1];
-  await post(`${CERB}/login/user`, { username: chain.user, password: '', csrftoken: csrf1 });
-  const fileHtml = await (await get(`${CERB}/file`)).text();
-  if (/name="username"/.test(fileHtml)) throw new Error(`login failed for ${chain.user}`);
-  const csrf2 = (RX.csrf.exec(fileHtml) || [, ''])[1];
-  // 4) list files (DataTables server-side)
-  const dirRes = await post(`${CERB}/file/json/dir`, { sEcho: 1, iDisplayStart: 0, iDisplayLength: 100000, cd: '/', csrftoken: csrf2 });
-  const rows = (JSON.parse(await dirRes.text()).aaData || []).map((r) => r.name).filter(Boolean);
-  let pfs = rows.filter((n) => /^PriceFull/.test(n));
-  if (chain.store) { const f = pfs.filter((n) => n.includes(`-${chain.store}-`)); if (f.length) pfs = f; }
-  if (!pfs.length) throw new Error(`no PriceFull for ${chain.name}`);
-  const name = pfs.sort().slice(-1)[0]; // newest by name (date suffix)
-  return parsePrices(await gunzipUrl(`${CERB}/file/d/${name}`, { Cookie: jar.header() }), keep);
+  const { cookie, files } = await cerberusSession(chain.user);
+  const dl = (name) => buf(`${CERB}/file/d/${name}`, { Cookie: cookie() });
+  const storesFile = files.find((n) => /Stores/.test(n));
+  const stores = storesFile ? parseStores(decode(await dl(storesFile))) : {};
+  // newest PriceFull per store id (store id = dash-delimited token after the chain id)
+  const pfByStore = {};
+  for (const n of files.filter((f) => /^PriceFull/.test(f))) {
+    const id = (n.match(new RegExp(`${chain.chainId}-(?:\\d+-)?0*(\\d+)-`)) || [, ''])[1];
+    if (id && (!pfByStore[id] || n > pfByStore[id])) pfByStore[id] = n;
+  }
+  const ids = Object.keys(stores).filter((id) => pfByStore[id]).slice(0, MAX);
+  const prices = {};
+  await pool(ids, async (id) => {
+    const got = parsePrices(gunzip(await dl(pfByStore[id])), keep); // PriceFull files are gzipped
+    if (Object.keys(got).length) prices[id] = got;
+  });
+  return { stores, prices };
 }
 
 (async function main() {
@@ -104,27 +138,33 @@ async function fetchCerberus(chain, keep) {
   const cfg = JSON.parse(fs.readFileSync(path.join(__dirname, 'chains.json'), 'utf8'));
   const tracked = JSON.parse(fs.readFileSync(path.join(__dirname, 'tracked-barcodes.json'), 'utf8')).barcodes;
   const keep = new Set(tracked);
-
-  // Local mode: parse pre-downloaded files from $PRICES_CACHE/<chainId>.gz instead
-  // of fetching (used by gen-prices-local.ps1 to work around Netspark TLS on dev).
+  // Local mode: parse pre-downloaded files from $PRICES_CACHE/<chainId>/ (a
+  // Stores file + <storeId>.gz PriceFull files), used by gen-prices-local.ps1.
   const cacheDir = process.env.PRICES_CACHE;
-  const fromCache = (ch) => parsePrices(zlib.gunzipSync(fs.readFileSync(path.join(cacheDir, `${ch.chainId}.gz`))).toString('utf8'), keep);
+  const fromCache = (ch) => {
+    const dir = path.join(cacheDir, ch.chainId);
+    const list = fs.existsSync(dir) ? fs.readdirSync(dir) : [];
+    const sf = list.find((f) => /stores/i.test(f));
+    const stores = sf ? parseStores(/\.gz$/.test(sf) ? gunzip(fs.readFileSync(path.join(dir, sf))) : decode(fs.readFileSync(path.join(dir, sf)))) : {};
+    const prices = {};
+    for (const f of list.filter((f) => /^\d+\.gz$/.test(f))) {
+      const got = parsePrices(gunzip(fs.readFileSync(path.join(dir, f))), keep);
+      if (Object.keys(got).length) prices[f.replace('.gz', '')] = got;
+    }
+    return { stores, prices };
+  };
 
   const chains = {};
   for (const ch of cfg.chains) {
     try {
       const res = cacheDir ? fromCache(ch)
-        : ch.type === 'shufersal' ? await fetchShufersal(ch, keep) : await fetchCerberus(ch, keep);
-      chains[ch.name] = { type: ch.type, store: res.store, prices: res.prices };
-      console.log(`[prices] ${ch.name}: ${Object.keys(res.prices).length}/${tracked.length} tracked items (store ${res.store})`);
-    } catch (e) {
-      console.warn(`[prices] ${ch.name}: SKIPPED — ${e.message}`);
-    }
+        : ch.type === 'shufersal' ? await fetchShufersal(keep) : await fetchCerberus(ch, keep);
+      chains[ch.name] = { stores: res.stores, prices: res.prices };
+      console.log(`[prices] ${ch.name}: ${Object.keys(res.stores).length} branches, prices for ${Object.keys(res.prices).length}`);
+    } catch (e) { console.warn(`[prices] ${ch.name}: SKIPPED — ${e.message}`); }
   }
-
-  const out = { updated: new Date().toISOString(), tracked, chains };
   const dest = path.join(__dirname, '..', 'prices.json');
-  fs.writeFileSync(dest, JSON.stringify(out));
-  console.log(`[prices] wrote ${dest} (${Object.keys(chains).length} chains) in ${Date.now() - t0}ms`);
+  fs.writeFileSync(dest, JSON.stringify({ updated: new Date().toISOString(), tracked, chains }));
+  console.log(`[prices] wrote ${dest} in ${Date.now() - t0}ms`);
   if (!Object.keys(chains).length) process.exit(1);
 })().catch((e) => { console.error('[prices] FAILED:', e.message); process.exit(1); });

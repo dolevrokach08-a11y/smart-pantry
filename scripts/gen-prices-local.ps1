@@ -1,44 +1,58 @@
 # Smart Pantry — local prices.json refresh (Windows / behind Netspark).
 #
-# In CI, `node scripts/fetch-prices.js` fetches everything directly. But on a
-# Netspark-filtered machine Node's TLS handshake to publishedprices.co.il fails,
-# while PowerShell (Schannel) trusts the intercepting cert like the browser does.
-# So locally we download the newest PriceFull per chain with PowerShell, then let
-# the Node script parse/filter them in cache mode.
+# In CI, `node scripts/fetch-prices.js` fetches every branch directly. On a
+# Netspark-filtered machine Node's TLS to publishedprices.co.il fails, while
+# PowerShell (Schannel) trusts the intercepting cert like the browser. So
+# locally we download — per chain — the Stores directory + the newest PriceFull
+# for the first $N stores, then let the Node script parse them in cache mode.
 #
-# Run:  powershell -ExecutionPolicy Bypass -File scripts\gen-prices-local.ps1
+# Run:  powershell -File scripts\gen-prices-local.ps1   (optionally -N 8)
 
+param([int]$N = 6)
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 $ErrorActionPreference = 'Stop'
-$root  = Split-Path $PSScriptRoot -Parent
 $cache = Join-Path $PSScriptRoot '.cache'
-New-Item -ItemType Directory -Force -Path $cache | Out-Null
 $cfg = (Get-Content (Join-Path $PSScriptRoot 'chains.json') -Raw | ConvertFrom-Json).chains
-
-$SHUF = 'https://prices.shufersal.co.il'
-$CERB = 'https://url.publishedprices.co.il'
-
-function Get-Csrf($html) { [regex]::Match($html, 'name="csrftoken"\s+content="([^"]+)"').Groups[1].Value }
+$SHUF = 'https://prices.shufersal.co.il'; $CERB = 'https://url.publishedprices.co.il'
+function Csrf($h) { [regex]::Match($h, 'name="csrftoken"\s+content="([^"]+)"').Groups[1].Value }
+function Gunzip([byte[]]$bytes) {
+  $ms = New-Object IO.MemoryStream(,$bytes); $gz = New-Object IO.Compression.GZipStream($ms, [IO.Compression.CompressionMode]::Decompress)
+  $out = New-Object IO.MemoryStream; $gz.CopyTo($out); $gz.Close(); return $out.ToArray()
+}
 
 foreach ($ch in $cfg) {
-  $dest = Join-Path $cache "$($ch.chainId).gz"
+  $dir = Join-Path $cache $ch.chainId
+  New-Item -ItemType Directory -Force -Path $dir | Out-Null
   try {
     if ($ch.type -eq 'shufersal') {
-      $grid = (Invoke-WebRequest "$SHUF/FileObject/UpdateCategory?catID=2&storeId=0" -UseBasicParsing -TimeoutSec 60).Content
-      $url = ([regex]::Matches($grid, 'href="([^"]+PriceFull[^"]+\.gz[^"]*)"') | ForEach-Object { $_.Groups[1].Value -replace '&amp;','&' })[0]
-      Invoke-WebRequest $url -OutFile $dest -TimeoutSec 120
+      $grid = (Invoke-WebRequest "$SHUF/FileObject/UpdateCategory?catID=5&storeId=0" -UseBasicParsing -TimeoutSec 60).Content
+      $u = @([regex]::Matches($grid, 'href="([^"]+Stores[^"]+\.gz[^"]*)"') | ForEach-Object { $_.Groups[1].Value -replace '&amp;','&' })[0]
+      Invoke-WebRequest $u -OutFile (Join-Path $dir 'stores.gz') -TimeoutSec 60
+      $sx = [Text.Encoding]::UTF8.GetString((Gunzip ([IO.File]::ReadAllBytes((Join-Path $dir 'stores.gz')))))
+      $ids = @([regex]::Matches($sx, '<StoreID>0*(\d+)</StoreID>') | ForEach-Object { $_.Groups[1].Value } | Select-Object -Unique -First $N)
+      foreach ($id in $ids) {
+        $g2 = (Invoke-WebRequest "$SHUF/FileObject/UpdateCategory?catID=2&storeId=$id" -UseBasicParsing -TimeoutSec 60).Content
+        $pf = @([regex]::Matches($g2, 'href="([^"]+PriceFull[^"]+\.gz[^"]*)"') | ForEach-Object { $_.Groups[1].Value -replace '&amp;','&' })[0]
+        if ($pf) { Invoke-WebRequest $pf -OutFile (Join-Path $dir ("{0}.gz" -f $id)) -TimeoutSec 90 }
+      }
     } else {
       $r1 = Invoke-WebRequest "$CERB/login" -SessionVariable s -UseBasicParsing -TimeoutSec 30
-      Invoke-WebRequest "$CERB/login/user" -Method Post -Body @{ username=$ch.user; password=''; csrftoken=(Get-Csrf $r1.Content) } -WebSession $s -UseBasicParsing | Out-Null
+      Invoke-WebRequest "$CERB/login/user" -Method Post -Body @{ username=$ch.user; password=''; csrftoken=(Csrf $r1.Content) } -WebSession $s -UseBasicParsing | Out-Null
       $rf = Invoke-WebRequest "$CERB/file" -WebSession $s -UseBasicParsing -TimeoutSec 30
       if ($rf.Content -match 'name="username"') { throw "login failed ($($ch.user))" }
-      $j = (Invoke-WebRequest "$CERB/file/json/dir" -Method Post -Body @{ sEcho=1; iDisplayStart=0; iDisplayLength=100000; cd='/'; csrftoken=(Get-Csrf $rf.Content) } -WebSession $s -UseBasicParsing -TimeoutSec 90).Content | ConvertFrom-Json
-      $pfs = $j.aaData | Where-Object { $_.name -match '^PriceFull' } | ForEach-Object { $_.name } | Sort-Object
-      if ($ch.store) { $f = $pfs | Where-Object { $_ -match "-$($ch.store)-" }; if ($f) { $pfs = $f } }
-      $name = $pfs | Select-Object -Last 1
-      Invoke-WebRequest "$CERB/file/d/$name" -WebSession $s -OutFile $dest -TimeoutSec 120
+      $j = (Invoke-WebRequest "$CERB/file/json/dir" -Method Post -Body @{ sEcho=1; iDisplayStart=0; iDisplayLength=100000; cd='/'; csrftoken=(Csrf $rf.Content) } -WebSession $s -UseBasicParsing -TimeoutSec 90).Content | ConvertFrom-Json
+      $stf = ($j.aaData | Where-Object { $_.name -match 'Stores' } | Select-Object -First 1).name
+      if ($stf) { Invoke-WebRequest "$CERB/file/d/$stf" -WebSession $s -OutFile (Join-Path $dir 'stores.xml') -TimeoutSec 60 }
+      $groups = @($j.aaData | Where-Object { $_.name -match '^PriceFull' } | ForEach-Object {
+        $m = [regex]::Match($_.name, "$($ch.chainId)-(?:\d+-)?0*(\d+)-")
+        if ($m.Success) { [pscustomobject]@{ id = $m.Groups[1].Value; name = $_.name } }
+      } | Group-Object id)
+      foreach ($g in @($groups | Select-Object -First $N)) {
+        $name = @($g.Group | Sort-Object name)[-1].name
+        Invoke-WebRequest "$CERB/file/d/$name" -WebSession $s -OutFile (Join-Path $dir ("{0}.gz" -f $g.Name)) -TimeoutSec 90
+      }
     }
-    "$($ch.name): downloaded $([Math]::Round((Get-Item $dest).Length/1KB)) KB"
+    "$($ch.name): cached $((Get-ChildItem $dir -Filter *.gz).Count) stores"
   } catch { Write-Warning "$($ch.name): $($_.Exception.Message)" }
 }
 

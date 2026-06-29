@@ -261,11 +261,15 @@
     return { amount: Math.round(amount * 100) / 100, count: promos.length, items: promos };
   }
 
-  // ---------- prices (Phase 1c — multi-chain) ----------
-  // External supermarket prices (prices.json, written by the scheduled Action)
-  // are merged by barcode. Kept in memory only — not persisted, so they refresh
-  // on every load and never pollute the user's saved data.
-  let priceData = null; // { updated, tracked, chains: { name: { store, prices } } }
+  // ---------- prices (Phase 1d — multi-chain, multi-store) ----------
+  // prices.json v3: { updated, tracked, chains: { name: { stores:{id:{name}}, prices:{id:{bc:price}} } } }
+  // Merged by barcode in memory only (never persisted). Each chain has a chosen
+  // branch (user pick saved locally, else the first priced branch).
+  let priceData = null;
+  const STORE_SEL_KEY = 'sp_storeSel';
+  let storeSel = {};
+  try { storeSel = JSON.parse(localStorage.getItem(STORE_SEL_KEY)) || {}; } catch (e) { storeSel = {}; }
+
   function applyPrices(data) {
     if (!data || !data.chains) return;
     priceData = data;
@@ -279,21 +283,33 @@
     if (!priceData) return null;
     return { updated: priceData.updated, chains: Object.keys(priceData.chains) };
   }
-  /** Cheapest {chain, price} for a barcode across all chains, or null. */
+  /** The branch used for a chain: the user's pick if it has prices, else the first priced branch. */
+  function chainStoreId(name) {
+    const c = priceData && priceData.chains[name];
+    if (!c || !c.prices) return null;
+    if (storeSel[name] && c.prices[storeSel[name]]) return storeSel[name];
+    return Object.keys(c.prices)[0] || null;
+  }
+  function priceAt(name, bc) {
+    const c = priceData && priceData.chains[name];
+    const sid = chainStoreId(name);
+    return c && sid && c.prices[sid] ? c.prices[sid][bc] : undefined;
+  }
+  /** Cheapest {chain, price} for a barcode across chains (at each chain's chosen branch). */
   function cheapestFor(barcode) {
     const bc = (barcode || '').trim();
     if (!bc || !priceData) return null;
     let best = null;
-    for (const [name, c] of Object.entries(priceData.chains)) {
-      const p = c.prices[bc];
+    for (const name of Object.keys(priceData.chains)) {
+      const p = priceAt(name, bc);
       if (p != null && (best == null || p < best.price)) best = { chain: name, price: p };
     }
     return best;
   }
 
-  /** Compare the whole shopping basket across chains: total per chain (over the
-   *  items it carries) + coverage, the cheapest fully-covering chain, the saving
-   *  vs the priciest, and the "buy-each-where-cheapest" optimum. */
+  /** Compare the whole shopping basket across chains (at each chain's chosen branch):
+   *  total + coverage per chain, cheapest fully-covering chain, saving vs priciest,
+   *  and the "buy-each-where-cheapest" optimum. */
   function basketComparison() {
     if (!priceData) return null;
     const basket = [];
@@ -303,26 +319,43 @@
     });
     if (!basket.length) return null;
 
-    const rows = Object.entries(priceData.chains).map(([name, c]) => {
+    const rows = Object.keys(priceData.chains).map((name) => {
       let total = 0, covered = 0;
-      basket.forEach((bc) => { const p = c.prices[bc]; if (p != null) { total += p; covered++; } });
-      return { name, total: Math.round(total * 100) / 100, covered };
+      basket.forEach((bc) => { const p = priceAt(name, bc); if (p != null) { total += p; covered++; } });
+      return { name, total: Math.round(total * 100) / 100, covered, store: currentStoreName(name) };
     }).sort((a, b) => (b.covered - a.covered) || (a.total - b.total));
 
     const full = rows.filter((r) => r.covered === basket.length);
     const ranked = (full.length ? full : rows).slice().sort((a, b) => a.total - b.total);
     const winner = ranked[0];
-    const baseline = ranked[ranked.length - 1]; // priciest among comparable
+    const baseline = ranked[ranked.length - 1];
     const optimalTotal = Math.round(basket.reduce((s, bc) => s + cheapestFor(bc).price, 0) * 100) / 100;
 
     return {
-      size: basket.length,
-      rows,                                   // for the per-chain list (coverage-then-price order)
-      winner, baseline,
+      size: basket.length, rows, winner, baseline,
       saves: Math.round((baseline.total - winner.total) * 100) / 100,
-      fullCoverage: full.length > 0,
-      optimalTotal,
+      fullCoverage: full.length > 0, optimalTotal,
     };
+  }
+
+  // ---------- store selection (for the branch picker) ----------
+  function chainNames() { return priceData ? Object.keys(priceData.chains) : []; }
+  /** All branches of a chain: [{id, name, priced}] (priced = we have prices for it). */
+  function storesFor(name) {
+    const c = priceData && priceData.chains[name];
+    if (!c) return [];
+    return Object.entries(c.stores || {}).map(([id, s]) => ({ id, name: s.name, priced: !!(c.prices && c.prices[id]) }));
+  }
+  function currentStoreName(name) {
+    const c = priceData && priceData.chains[name];
+    const sid = chainStoreId(name);
+    return c && sid && c.stores && c.stores[sid] ? c.stores[sid].name : null;
+  }
+  function getStoreSel() { return Object.assign({}, storeSel); }
+  function setStore(name, id) {
+    if (id) storeSel[name] = id; else delete storeSel[name];
+    localStorage.setItem(STORE_SEL_KEY, JSON.stringify(storeSel));
+    if (priceData) applyPrices(priceData);
   }
 
   function contextualTip() {
@@ -367,5 +400,6 @@
     status, isNeeded, avgDaysBetween, predictedDaysLeft, daysToExpiry, isExpiringSoon,
     shoppingList, summary, savingsSummary, contextualTip,
     applyPrices, priceInfo, cheapestFor, basketComparison,
+    chainNames, storesFor, currentStoreName, getStoreSel, setStore,
   };
 })(window);
