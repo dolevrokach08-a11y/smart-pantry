@@ -148,23 +148,34 @@ async function fetchCerberus(chain, keep) {
     const stores = sf ? parseStores(/\.gz$/.test(sf) ? gunzip(fs.readFileSync(path.join(dir, sf))) : decode(fs.readFileSync(path.join(dir, sf)))) : {};
     const prices = {};
     for (const f of list.filter((f) => /^\d+\.gz$/.test(f))) {
-      const got = parsePrices(gunzip(fs.readFileSync(path.join(dir, f))), keep);
-      if (Object.keys(got).length) prices[f.replace('.gz', '')] = got;
+      try {
+        const got = parsePrices(gunzip(fs.readFileSync(path.join(dir, f))), keep);
+        if (Object.keys(got).length) prices[f.replace('.gz', '')] = got;
+      } catch (e) { /* skip a corrupt/partial cached file */ }
     }
     return { stores, prices };
   };
 
-  const chains = {};
+  const dest = path.join(__dirname, '..', 'prices.json');
+  // Merge: start from the existing file and only replace a chain when this run
+  // actually fetched prices for it. So CI (which can reach Shufersal but not the
+  // login portals) keeps the cerberus chains last fetched from an Israeli IP,
+  // and a local cerberus refresh keeps CI's full Shufersal data.
+  let chains = {};
+  try { chains = JSON.parse(fs.readFileSync(dest, 'utf8')).chains || {}; } catch (e) { chains = {}; }
   for (const ch of cfg.chains) {
     try {
       const res = cacheDir ? fromCache(ch)
         : ch.type === 'shufersal' ? await fetchShufersal(keep) : await fetchCerberus(ch, keep);
-      chains[ch.name] = { stores: res.stores, prices: res.prices };
-      console.log(`[prices] ${ch.name}: ${Object.keys(res.stores).length} branches, prices for ${Object.keys(res.prices).length}`);
-    } catch (e) { console.warn(`[prices] ${ch.name}: SKIPPED — ${e.message}`); }
+      if (Object.keys(res.prices).length) {
+        chains[ch.name] = { stores: res.stores, prices: res.prices };
+        console.log(`[prices] ${ch.name}: ${Object.keys(res.stores).length} branches, prices for ${Object.keys(res.prices).length}`);
+      } else {
+        console.log(`[prices] ${ch.name}: no prices this run — kept ${chains[ch.name] ? 'existing' : 'nothing'}`);
+      }
+    } catch (e) { console.warn(`[prices] ${ch.name}: SKIPPED (${e.message}) — kept ${chains[ch.name] ? 'existing' : 'nothing'}`); }
   }
-  const dest = path.join(__dirname, '..', 'prices.json');
   fs.writeFileSync(dest, JSON.stringify({ updated: new Date().toISOString(), tracked, chains }));
-  console.log(`[prices] wrote ${dest} in ${Date.now() - t0}ms`);
+  console.log(`[prices] wrote ${dest} (${Object.keys(chains).length} chains) in ${Date.now() - t0}ms`);
   if (!Object.keys(chains).length) process.exit(1);
 })().catch((e) => { console.error('[prices] FAILED:', e.message); process.exit(1); });

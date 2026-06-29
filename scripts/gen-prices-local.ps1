@@ -8,7 +8,10 @@
 #
 # Run:  powershell -File scripts\gen-prices-local.ps1   (optionally -N 8)
 
-param([int]$N = 6)
+# By default refreshes only the login (cerberus) chains — GitHub Actions can't
+# reach publishedprices.co.il, so those come from this Israeli machine while CI
+# keeps Shufersal fresh. Pass -IncludeShufersal to fetch Shufersal locally too.
+param([int]$N = 200, [switch]$IncludeShufersal)
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 $ErrorActionPreference = 'Stop'
 $cache = Join-Path $PSScriptRoot '.cache'
@@ -21,6 +24,7 @@ function Gunzip([byte[]]$bytes) {
 }
 
 foreach ($ch in $cfg) {
+  if ($ch.type -eq 'shufersal' -and -not $IncludeShufersal) { continue }
   $dir = Join-Path $cache $ch.chainId
   New-Item -ItemType Directory -Force -Path $dir | Out-Null
   try {
