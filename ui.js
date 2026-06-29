@@ -65,17 +65,39 @@
   function subText(it) {
     let s = `יש: ${it.currentQty} ${esc(it.unit)}`;
     if (it.lastPrice != null) {
-      s += it.promo
-        ? ` · <span class="promo-price">₪${it.lastPrice} במבצע</span>`
-        : ` · <span class="price-tag">₪${it.lastPrice}</span>`;
+      s += ` · <span class="price-tag">₪${it.lastPrice}</span>`;
+      if (it.cheapestChain) s += ` <span class="cheap-at">הכי זול ב${esc(it.cheapestChain)}</span>`;
     }
     return s;
+  }
+  const fmtShekel = (n) => '₪' + (Math.round(n * 100) / 100).toFixed(2).replace(/\.?0+$/, '');
+  // multi-chain "cheapest basket" panel shown at the top of the list
+  function basketPanel() {
+    const b = SP.basketComparison && SP.basketComparison();
+    if (!b) return '';
+    const rows = b.rows.map((r) => {
+      const win = r.name === b.winner.name;
+      const partial = r.covered < b.size;
+      return `<div class="bc-row ${win ? 'win' : ''}">
+        <span class="bc-name">${win ? '🏆 ' : ''}${esc(r.name)}</span>
+        <span class="bc-total">${fmtShekel(r.total)}${partial ? `<span class="bc-cov">${r.covered}/${b.size}</span>` : ''}</span>
+      </div>`;
+    }).join('');
+    return `<div class="basket-cmp">
+      <div class="bc-head">
+        <div class="bc-lbl">הסל שלך · ${b.size} פריטים · הכי זול ב־</div>
+        <div class="bc-win">${esc(b.winner.name)} <span class="bc-win-amt">${fmtShekel(b.winner.total)}</span></div>
+        ${b.saves > 0 ? `<div class="bc-save">חוסך ${fmtShekel(b.saves)} מול ${esc(b.baseline.name)}</div>` : ''}
+      </div>
+      <div class="bc-rows">${rows}</div>
+      ${b.optimalTotal < b.winner.total ? `<div class="bc-opt">💡 קנייה מפוצלת (כל פריט בזול ביותר): ${fmtShekel(b.optimalTotal)}</div>` : ''}
+    </div>`;
   }
 
   // ---------- view: HOME ----------
   function renderHome() {
     const s = SP.summary();
-    const sav = SP.savingsSummary();
+    const bcmp = SP.basketComparison && SP.basketComparison();
     const pct = s.fullnessPct;
     const title = pct >= 80 ? 'מצב מלא 👌' : pct >= 55 ? 'מצב טוב 👌' : pct >= 30 ? 'כדאי להשלים 🛒' : 'המזווה מתרוקן 🛒';
     const desc = `רוב הבסיס ${pct >= 55 ? 'קיים' : 'חסר'}. <b>${s.out} מוצרים</b> נגמרו ו־<b>${s.low}</b> עומדים להיגמר.`;
@@ -84,8 +106,8 @@
     SP.shoppingList().forEach((g) => g.items.forEach((it) => flat.push(it)));
     const preview = flat.slice(0, 3);
 
-    const savAmt = sav.amount > 0 ? `₪${sav.amount}` : '₪0';
-    const savGo = sav.count > 0 ? `${sav.count} מבצעים →` : 'מחירים בקרוב →';
+    const savAmt = bcmp && bcmp.saves > 0 ? `₪${bcmp.saves}` : '₪0';
+    const savGo = bcmp && bcmp.saves > 0 ? `הכי זול ב${bcmp.winner.name} →` : 'מחירים בקרוב →';
 
     const previewBlock = preview.length
       ? `<div class="row-head"><span class="h">צריך לקנות</span><span class="link" data-go="list">לרשימה המלאה →</span></div>
@@ -111,7 +133,7 @@
           </div>
           <div class="savings-banner" data-go="insights">
             <div class="ic">💰</div>
-            <div><div class="lbl">חסכת החודש</div><div class="amt">${savAmt}</div></div>
+            <div><div class="lbl">${bcmp && bcmp.saves > 0 ? 'חיסכון על הסל' : 'חיסכון'}</div><div class="amt">${savAmt}</div></div>
             <div class="go">${savGo}</div>
           </div>
         </div>
@@ -151,6 +173,7 @@
 
     $('#view-list').innerHTML = `
       <div class="list-head"><span></span><span class="count">${s.neededCount} פריטים</span></div>
+      ${basketPanel()}
       <button class="btn list-cta" id="enterShop"><span style="font-size:20px">🛒</span> צא לקנייה במצב חכם <span>←</span></button>
       <div class="tip"><span class="emoji">${tip.emoji}</span><span>${tip.text}</span></div>
       ${body}`;
@@ -215,11 +238,13 @@
     return buckets;
   }
   function renderInsights() {
-    const sav = SP.savingsSummary();
-    const amt = sav.amount;
+    // Headline savings = how much the current basket saves at the cheapest chain
+    // vs the priciest (the real, multi-chain story); falls back to ₪0 with copy.
+    const bc = SP.basketComparison && SP.basketComparison();
+    const amt = bc && bc.saves > 0 ? bc.saves : 0;
     const heroAmt = amt > 0 ? `₪${Math.floor(amt)}<small>.${String(Math.round((amt % 1) * 100)).padStart(2, '0')}</small>` : '₪0';
-    const heroDelta = amt > 0 ? '<div class="delta">↑ חיסכון פעיל החודש</div>' : '';
-    const heroLbl = amt > 0 ? 'חסכת החודש בזכות מבצעים' : 'החיסכון יצטבר כשנחבר מחירי הרשתות';
+    const heroDelta = amt > 0 ? `<div class="delta">↓ ${esc(bc.winner.name)} מול ${esc(bc.baseline.name)}</div>` : '';
+    const heroLbl = amt > 0 ? `חיסכון על הסל הנוכחי (${bc.size} פריטים)` : 'בנו רשימה ונראה איפה הסל הכי זול';
 
     const buckets = purchasesByMonth();
     const max = Math.max(1, ...buckets.map((b) => b.count));
@@ -229,17 +254,20 @@
       return `<div class="col ${now ? 'now' : ''}"><div class="bar" style="height:${h}px"></div><span class="m">${b.label}</span></div>`;
     }).join('');
 
-    const promos = sav.items;
-    let promoBlock;
-    if (promos.length) {
-      promoBlock = `<div class="items" style="margin-top:10px">${promos.map((it) => `
-        <div class="item promo-card">
+    // "where is each basket item cheapest" — complements the list's basket panel
+    const basketItems = SP.getItems().filter((it) => SP.isNeeded(it) && it.barcode && SP.cheapestFor(it.barcode));
+    let breakdown;
+    if (basketItems.length) {
+      breakdown = `<div class="items" style="margin-top:10px">${basketItems.map((it) => {
+        const c = SP.cheapestFor(it.barcode);
+        return `<div class="item">
           <div class="emoji-badge ${badgeClass(it)}">${SP.itemEmoji(it)}</div>
-          <div class="item-main"><div class="item-name">${esc(it.name)}</div><div class="item-sub">${esc(shortCat(it.category))}</div></div>
-          <div class="price"><div class="now">${it.lastPrice != null ? '₪' + it.lastPrice : 'מבצע'}</div>${it.regPrice != null ? `<div class="was">₪${it.regPrice}</div>` : ''}</div>
-        </div>`).join('')}</div>`;
+          <div class="item-main"><div class="item-name">${esc(it.name)}</div><div class="item-sub"><span class="cheap-at">הכי זול ב${esc(c.chain)}</span></div></div>
+          <div class="price"><div class="now">₪${c.price}</div></div>
+        </div>`;
+      }).join('')}</div>`;
     } else {
-      promoBlock = `<div class="empty" style="padding:30px 10px"><div class="big">🔥</div><div class="t">אין מבצעים פעילים כרגע<br><span style="font-size:13px">מחירים ומבצעים יתווספו אוטומטית כשנחבר את נתוני הרשתות</span></div></div>`;
+      breakdown = `<div class="empty" style="padding:30px 10px"><div class="big">🛒</div><div class="t">בנו רשימה כדי לראות איפה כל פריט הכי זול<br><span style="font-size:13px">המחירים מתעדכנים אוטומטית מהרשתות</span></div></div>`;
     }
 
     $('#view-insights').innerHTML = `
@@ -253,15 +281,15 @@
         <div class="panel-head"><span class="h">פעילות קנייה</span><span class="s">6 חודשים</span></div>
         <div class="barchart">${bars}</div>
       </div>
-      <div class="row-head"><span class="h">🔥 מבצעים על מה שחסר</span>${promos.length ? `<span class="promo-count">${promos.length}</span>` : ''}</div>
-      ${promoBlock}
+      <div class="row-head"><span class="h">🥇 איפה כל פריט הכי זול</span></div>
+      ${breakdown}
       ${priceSourceLine()}`;
   }
   function priceSourceLine() {
     const m = SP.priceInfo && SP.priceInfo();
     if (!m) return '';
     const when = m.updated ? new Date(m.updated).toLocaleDateString('he-IL') : '';
-    return `<div class="price-source">💲 מחירים מ־<b>${esc(m.chain)}${m.storeName ? ' · ' + esc(m.storeName) : ''}</b>${when ? ' · עודכן ' + when : ''}</div>`;
+    return `<div class="price-source">💲 מחירים מ־<b>${m.chains.length} רשתות</b> (${m.chains.map(esc).join(' · ')})${when ? ' · עודכן ' + when : ''}</div>`;
   }
 
   // ---------- SHOPPING MODE (full-screen) ----------

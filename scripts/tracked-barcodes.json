@@ -1,0 +1,11 @@
+{
+  "_comment": "Barcodes the basket comparison tracks. Must be NATIONAL-brand barcodes that exist across chains (not store/private-label SKUs) so the same item can be priced in every chain. Keep in sync with the seed/added items that carry a barcode. These six were verified present in all four chains.",
+  "barcodes": [
+    "7290000040974",
+    "7290000041445",
+    "7290000144474",
+    "7290000066318",
+    "7290000072623",
+    "7290011018832"
+  ]
+}

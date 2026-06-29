@@ -261,31 +261,69 @@
     return { amount: Math.round(amount * 100) / 100, count: promos.length, items: promos };
   }
 
-  // ---------- prices (Phase 1b) ----------
+  // ---------- prices (Phase 1c — multi-chain) ----------
   // External supermarket prices (prices.json, written by the scheduled Action)
-  // are merged into items by barcode. Kept in memory only — not persisted, so
-  // they refresh on every load and never pollute the user's saved data.
-  let priceMeta = null;
+  // are merged by barcode. Kept in memory only — not persisted, so they refresh
+  // on every load and never pollute the user's saved data.
+  let priceData = null; // { updated, tracked, chains: { name: { store, prices } } }
   function applyPrices(data) {
-    if (!data || !data.prices) return;
-    priceMeta = { chain: data.chain, store: data.store, storeName: data.storeName, updated: data.updated, count: data.count };
-    const P = data.prices, PR = data.promos || {};
+    if (!data || !data.chains) return;
+    priceData = data;
     state.items.forEach((it) => {
-      const bc = (it.barcode || '').trim();
-      if (!bc) return;
-      if (PR[bc]) {
-        it.lastPrice = PR[bc].p;
-        it.regPrice = PR[bc].was != null ? PR[bc].was : (P[bc] != null ? P[bc] : null);
-        it.promo = true;
-      } else if (P[bc] != null) {
-        it.lastPrice = P[bc];
-        it.regPrice = null;
-        it.promo = false;
-      }
+      const c = cheapestFor(it.barcode);
+      if (c) { it.lastPrice = c.price; it.cheapestChain = c.chain; }
     });
     emit();
   }
-  function priceInfo() { return priceMeta; }
+  function priceInfo() {
+    if (!priceData) return null;
+    return { updated: priceData.updated, chains: Object.keys(priceData.chains) };
+  }
+  /** Cheapest {chain, price} for a barcode across all chains, or null. */
+  function cheapestFor(barcode) {
+    const bc = (barcode || '').trim();
+    if (!bc || !priceData) return null;
+    let best = null;
+    for (const [name, c] of Object.entries(priceData.chains)) {
+      const p = c.prices[bc];
+      if (p != null && (best == null || p < best.price)) best = { chain: name, price: p };
+    }
+    return best;
+  }
+
+  /** Compare the whole shopping basket across chains: total per chain (over the
+   *  items it carries) + coverage, the cheapest fully-covering chain, the saving
+   *  vs the priciest, and the "buy-each-where-cheapest" optimum. */
+  function basketComparison() {
+    if (!priceData) return null;
+    const basket = [];
+    state.items.filter(isNeeded).forEach((it) => {
+      const bc = (it.barcode || '').trim();
+      if (bc && cheapestFor(bc)) basket.push(bc);
+    });
+    if (!basket.length) return null;
+
+    const rows = Object.entries(priceData.chains).map(([name, c]) => {
+      let total = 0, covered = 0;
+      basket.forEach((bc) => { const p = c.prices[bc]; if (p != null) { total += p; covered++; } });
+      return { name, total: Math.round(total * 100) / 100, covered };
+    }).sort((a, b) => (b.covered - a.covered) || (a.total - b.total));
+
+    const full = rows.filter((r) => r.covered === basket.length);
+    const ranked = (full.length ? full : rows).slice().sort((a, b) => a.total - b.total);
+    const winner = ranked[0];
+    const baseline = ranked[ranked.length - 1]; // priciest among comparable
+    const optimalTotal = Math.round(basket.reduce((s, bc) => s + cheapestFor(bc).price, 0) * 100) / 100;
+
+    return {
+      size: basket.length,
+      rows,                                   // for the per-chain list (coverage-then-price order)
+      winner, baseline,
+      saves: Math.round((baseline.total - winner.total) * 100) / 100,
+      fullCoverage: full.length > 0,
+      optimalTotal,
+    };
+  }
 
   function contextualTip() {
     const s = summary();
@@ -305,19 +343,18 @@
       id: uid(), name, category, unit, currentQty, minThreshold, isStaple,
       expiryDate: null, barcode: '', neededManual: false, purchases: [], lastPrice: null, promo: false,
     });
-    // Three seed items carry real Shufersal barcodes so live prices show
-    // out of the box; the rest are left for the user to fill a barcode on.
+    // Seed items carry real national-brand barcodes verified across all four
+    // chains, so the multi-chain basket comparison works out of the box.
     const items = [
-      mk('חלב', 'מקרר (חלב, ביצים, גבינות)', 'ליטר', 1, 2, true),
-      mk('ביצים', 'מקרר (חלב, ביצים, גבינות)', 'יחידות', 12, 6, true),
-      mk('לחם', 'מאפים ולחם', 'יחידות', 0, 1, true),
-      mk('עגבניות', 'ירקות ופירות', 'ק"ג', 2, 1, false),
-      mk('נייר טואלט', 'טואלטיקה', 'חבילות', 1, 1, true),
-      mk('סבון כלים', 'ניקיון', 'בקבוקים', 2, 1, false),
+      mk('חלב 2%', 'מקרר (חלב, ביצים, גבינות)', 'ליטר', 0, 1, true),
+      mk("קוטג'", 'מקרר (חלב, ביצים, גבינות)', 'יחידות', 1, 2, true),
+      mk('שמן קנולה', 'יבשים ושימורים', 'בקבוקים', 0, 1, true),
+      mk('במבה', 'חטיפים ומתוקים', 'יחידות', 0, 1, false),
+      mk('קטשופ', 'יבשים ושימורים', 'בקבוקים', 0, 1, false),
+      mk('קוקה קולה', 'משקאות', 'יחידות', 0, 2, false),
     ];
-    items[0].barcode = '7290000042015'; // חלב 3% מהדרין 1ל
-    items[2].barcode = '7290000002026'; // לחם אחיד 750ג
-    items[5].barcode = '7290020188151'; // נוזל כלים 750מ
+    const codes = ['7290000040974', '7290000041445', '7290000144474', '7290000066318', '7290000072623', '7290011018832'];
+    items.forEach((it, i) => { it.barcode = codes[i]; });
     return items;
   }
 
@@ -329,6 +366,6 @@
     markPurchased, toggleNeeded, adjustQty,
     status, isNeeded, avgDaysBetween, predictedDaysLeft, daysToExpiry, isExpiringSoon,
     shoppingList, summary, savingsSummary, contextualTip,
-    applyPrices, priceInfo,
+    applyPrices, priceInfo, cheapestFor, basketComparison,
   };
 })(window);

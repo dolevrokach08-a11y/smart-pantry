@@ -265,6 +265,24 @@ h1, h2, h3 { font-family: var(--font-head); margin: 0; }
 }
 .tip .emoji { font-size: 20px; }
 
+/* ---------- multi-chain "cheapest basket" panel ---------- */
+.basket-cmp { background: var(--surface); border: 1.5px solid var(--accent-soft); border-radius: var(--r-lg); padding: 16px; margin: 12px 0 2px; box-shadow: var(--shadow); animation: riseIn .5s both; }
+.bc-head { text-align: center; padding-bottom: 12px; border-bottom: 1px solid var(--border); margin-bottom: 10px; }
+.bc-lbl { font: 600 12.5px var(--font-body); color: var(--text-dim); }
+.bc-win { font: 900 22px var(--font-head); color: var(--accent-deep); margin-top: 3px; }
+.bc-win .bc-win-amt { color: var(--accent); }
+.bc-save { display: inline-block; margin-top: 9px; background: var(--accent-soft); color: var(--accent-deep); font: 800 12px var(--font-head); padding: 5px 13px; border-radius: 20px; }
+.bc-rows { display: flex; flex-direction: column; gap: 2px; }
+.bc-row { display: flex; align-items: center; justify-content: space-between; padding: 9px 11px; border-radius: 12px; font: 700 14px var(--font-body); color: var(--text-dim); }
+.bc-row.win { background: var(--accent-soft); color: var(--accent-deep); }
+.bc-name { display: flex; align-items: center; gap: 5px; }
+.bc-total { font: 800 15px var(--font-head); display: flex; align-items: center; gap: 7px; }
+.bc-cov { font: 700 10px var(--font-body); color: var(--text-faint2); background: var(--surface-2); padding: 1px 6px; border-radius: 10px; }
+.bc-opt { margin-top: 11px; font: 600 12px var(--font-body); color: #7a5c12; text-align: center; background: var(--sun-soft); padding: 9px; border-radius: 12px; }
+.item-sub .cheap-at { font: 800 10px var(--font-head); color: var(--accent-deep); background: var(--accent-soft); padding: 2px 7px; border-radius: 11px; }
+.item .price { margin-inline-start: auto; text-align: left; }
+.item .price .now { font: 800 16px var(--font-head); color: var(--accent-deep); }
+
 /* =====================================================================
    INSIGHTS view
    ===================================================================== */
