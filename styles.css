@@ -421,6 +421,7 @@ h1, h2, h3 { font-family: var(--font-head); margin: 0; }
 .sheet h2 { font: 800 21px var(--font-head); margin-bottom: 14px; }
 .field { margin-bottom: 12px; }
 .field label { display: block; font: 700 12.5px var(--font-body); color: var(--text-dim); margin-bottom: 5px; }
+.field-hint { font: 600 11.5px/1.4 var(--font-body); color: var(--text-faint); background: var(--surface-2); border-radius: 12px; padding: 9px 12px; margin: -2px 0 12px; }
 .field input, .field select {
   width: 100%; border: 1px solid var(--border); background: var(--bg); border-radius: var(--r-sm);
   padding: 12px 13px; font: 600 15px var(--font-body); color: var(--text);

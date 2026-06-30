@@ -404,6 +404,7 @@
         <div class="field"><label>תפוגה (לא חובה)</label><input type="date" id="s-exp" value="${it.expiryDate ? String(it.expiryDate).slice(0, 10) : ''}" /></div>
         <div class="field"><label>ברקוד (לא חובה)</label><input type="text" id="s-barcode" value="${esc(it.barcode || '')}" placeholder="למחירים" /></div>
       </div>
+      <div class="field-hint">💡 ברקוד מאפשר השוואת מחירים בין הרשתות. מוצרים נפוצים (חלב, במבה, שמן…) כבר מזוהים אוטומטית.</div>
       <div class="switch-row"><span>מוצר קבוע (תמיד שיהיה בבית)</span>
         <span class="switch"><input type="checkbox" id="s-staple" ${it.isStaple ? 'checked' : ''} /></span></div>`;
   }

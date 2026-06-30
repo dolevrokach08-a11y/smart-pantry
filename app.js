@@ -86,6 +86,7 @@
 
   function persist() {
     state.updatedAt = new Date().toISOString();
+    repriceItems(); // keep prices fresh after add/update/qty changes (no-op until prices load)
     localStorage.setItem(LS_KEY, JSON.stringify(state));
     // Firebase hook: if a cloud sync layer registered itself, push there too.
     if (typeof global.SP_cloudSave === 'function') {
@@ -273,11 +274,19 @@
   function applyPrices(data) {
     if (!data || !data.chains) return;
     priceData = data;
+    repriceItems();
+    emit();
+  }
+  /** (Re)compute lastPrice/cheapestChain for every item from the loaded prices.
+   *  Runs on price load AND after any item mutation (see persist), so a newly
+   *  added item with a tracked barcode gets its price immediately. */
+  function repriceItems() {
+    if (!priceData) return;
     state.items.forEach((it) => {
       const c = cheapestFor(it.barcode);
       if (c) { it.lastPrice = c.price; it.cheapestChain = c.chain; }
+      else { it.lastPrice = null; it.cheapestChain = null; }
     });
-    emit();
   }
   function priceInfo() {
     if (!priceData) return null;
@@ -379,7 +388,7 @@
     // Seed items carry real national-brand barcodes verified across all four
     // chains, so the multi-chain basket comparison works out of the box.
     const items = [
-      mk('חלב 2%', 'מקרר (חלב, ביצים, גבינות)', 'ליטר', 0, 1, true),
+      mk('חלב טרי 2% דל לקטוז', 'מקרר (חלב, ביצים, גבינות)', 'ליטר', 0, 1, true),
       mk("קוטג'", 'מקרר (חלב, ביצים, גבינות)', 'יחידות', 1, 2, true),
       mk('שמן קנולה', 'יבשים ושימורים', 'בקבוקים', 0, 1, true),
       mk('במבה', 'חטיפים ומתוקים', 'יחידות', 0, 1, false),
