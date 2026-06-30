@@ -418,6 +418,26 @@
       expiryDate: $('#s-exp').value || null, barcode: $('#s-barcode').value.trim(), isStaple: $('#s-staple').checked,
     };
   }
+  // auto category: heuristic guess instantly, AI refine if a key is set.
+  // Only in the add flow, and never overrides a category the user picked.
+  let autoCat = false;     // add sheet on, edit sheet off
+  let catTouched = false;  // user manually changed #s-cat
+  let autoCatTimer = null;
+  function autoClassify(name, immediate) {
+    if (!autoCat || catTouched) return;
+    const nm = (name || '').trim();
+    if (nm.length < 2) return;
+    const g = SP.guessCategory ? SP.guessCategory(nm) : null;   // instant, no key needed
+    if (g) { const c = $('#s-cat'); if (c && !catTouched) c.value = g; }
+    if (!(SP.hasAiKey && SP.hasAiKey())) return;                // AI step needs a key
+    if (autoCatTimer) clearTimeout(autoCatTimer);
+    const run = () => SP.classifyCategory(nm).then((cat) => {
+      // ignore stale results (name changed) or a meanwhile-manual category
+      if (cat && autoCat && !catTouched && $('#s-cat') && $('#s-name') && $('#s-name').value.trim() === nm) $('#s-cat').value = cat;
+    });
+    if (immediate) run(); else autoCatTimer = setTimeout(run, 700);
+  }
+
   // catalog autocomplete under the name field: type a name → pick → barcode auto-fills
   function renderNameSug(q) {
     const box = $('#nameSug'); if (!box) return;
@@ -427,10 +447,12 @@
     box.hidden = false;
   }
   function addSheet() {
+    autoCat = true; catTouched = false;
     openSheet(`<h2>הוספת מוצר</h2>${formFields()}<button class="btn" id="s-add">הוסף למזווה</button>`);
     setTimeout(() => $('#s-name') && $('#s-name').focus(), 250);
   }
   function editSheet(id) {
+    autoCat = false; catTouched = true; // existing item already has a category — don't auto-touch it
     const it = SP.getItem(id); if (!it) return;
     openSheet(`<h2>עריכת מוצר</h2>${formFields(it)}
       <button class="btn" id="s-save" data-id="${id}">שמירה</button>
@@ -512,6 +534,19 @@
        { enableHighAccuracy: false, timeout: 10000, maximumAge: 600000 });
   }
 
+  // AI category settings: the user's own Anthropic key, stored only in this browser.
+  function aiKeyHtml() {
+    const on = SP.hasAiKey && SP.hasAiKey();
+    return `
+      <div class="menu-item">
+        <div class="h">🤖 סיווג קטגוריה חכם</div>
+        <div class="item-sub">מוצרים חדשים מסווגים אוטומטית לקטגוריה. בלי מפתח — ניחוש מילות-מפתח מהיר. עם מפתח Anthropic שלכם — סיווג מדויק ב-AI. המפתח נשמר רק בדפדפן הזה ונשלח אך ורק ל-Anthropic.</div>
+        <div class="field" style="margin-top:10px"><input type="password" id="aiKey" placeholder="sk-ant-..." value="${esc((SP.getAiKey && SP.getAiKey()) || '')}" autocomplete="off" /></div>
+        <button class="btn sm" id="aiKeySave" style="margin-top:8px">שמירת מפתח</button>
+        <div id="aiKeyStatus" class="gps-status"${on ? '' : ' hidden'}>✓ סיווג AI פעיל</div>
+      </div>`;
+  }
+
   function settingsSheet() {
     const s = SP.summary();
     const fbStatus = (window.SP_cloudSave) ? 'פעיל ✓' : 'כבוי (מקומי בלבד)';
@@ -525,6 +560,7 @@
       <div class="menu-item"><div class="h">💡 איך זה עובד</div>
         <div class="item-sub">לכל מוצר יש סף מינימום. כשהכמות יורדת מתחת לסף הוא קופץ אוטומטית לרשימה. המערכת לומדת את קצב הצריכה ומזכירה עוד לפני שנגמר.</div></div>
       ${storePickerHtml()}
+      ${aiKeyHtml()}
       <button class="btn danger sm" id="resetBtn" style="margin-top:8px">איפוס נתונים</button>`);
   }
 
@@ -576,6 +612,7 @@
       if ($('#s-name')) $('#s-name').value = sug.dataset.nm;
       if ($('#s-barcode')) $('#s-barcode').value = sug.dataset.bc;
       const box = $('#nameSug'); if (box) { box.hidden = true; box.innerHTML = ''; }
+      autoClassify(sug.dataset.nm, true);
       toast('✓ זוהה — הברקוד מולא');
       return;
     }
@@ -640,12 +677,20 @@
       if (confirm('לאפס את כל הנתונים? פעולה זו אינה הפיכה.')) { localStorage.removeItem('smartPantry_v1'); location.reload(); }
       return;
     }
+    if (t.id === 'aiKeySave') {
+      const inp = $('#aiKey'); if (!inp) return;
+      SP.setAiKey(inp.value);
+      const on = SP.hasAiKey();
+      const st = $('#aiKeyStatus'); if (st) { st.hidden = !on; st.textContent = on ? '✓ סיווג AI פעיל' : ''; }
+      toast(on ? '✓ מפתח נשמר — סיווג AI פעיל' : 'המפתח נמחק');
+      return;
+    }
     if (t.id === 'installBtn' && deferredInstall) { e.preventDefault(); deferredInstall.prompt(); deferredInstall = null; return; }
   });
 
   // pantry search (input delegation)
   document.addEventListener('input', (e) => {
-    if (e.target.id === 's-name') { renderNameSug(e.target.value); return; }
+    if (e.target.id === 's-name') { renderNameSug(e.target.value); autoClassify(e.target.value, false); return; }
     if (e.target.id === 'search') { pf.search = e.target.value; renderPantry(); }
     else if (e.target.id === 'topSearch') {
       pf.search = e.target.value;
@@ -656,6 +701,7 @@
 
   // branch picker (select change)
   document.addEventListener('change', (e) => {
+    if (e.target.id === 's-cat') { catTouched = true; return; } // respect a manual category pick
     const sel = e.target.closest('[data-store-sel]');
     if (!sel) return;
     const chain = sel.getAttribute('data-store-sel');

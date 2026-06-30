@@ -415,6 +415,74 @@
   }
   function catalogSize() { return catalog.length; }
 
+  // ---------- auto category (hybrid: instant keyword guess + optional AI) ----------
+  // Instant, offline, no-key heuristic. Keyed first-match-wins; order matters
+  // (fish before dry so "טונה טריה" → בשר ודגים but plain "טונה" → שימורים).
+  const CAT_KEYWORDS = [
+    ['בשר ודגים', /עוף|הודו|בשר|בקר|כבש|המבורגר|קבב|נקני|שניצל|פרגי|כנפי|שוקיים|חזה עוף|סלמון|דג |דגים|טונה טרי|פילה|לברק|דניס|אמנון|בורי|סינטה|אנטריקוט|צלי/],
+    ['ירקות ופירות', /עגבני|מלפפון|גזר|בצל|תפוח אדמה|תפו"א|תפוח|בננה|לימון|פלפל|חסה|כרוב|בטטה|אבוקדו|תות|ענב|אבטיח|מלון|תפוז|קלמנטינ|שום|זנגביל|פטרוזיל|כוסבר|שמיר|נענע|סלק|דלעת|קישוא|חציל|פטריו|ברוקולי|כרובית|רימון|אגס|אפרסק|נקטרינ|שזיף|דובדבן|אננס|מנגו|קיווי|תאנ|תמר|רוקט|תרד|פטרוזי/],
+    ['מקרר (חלב, ביצים, גבינות)', /חלב|גבינ|קוטג|יוגורט|שמנת|חמאה|ביצי|ביצה|לבן|אשל|מעדן|דנונה|מילקי|פודינג|טופו|לברנה|נפוליאון|פרש|גיל|יופלה|אקטימל|דניאלה/],
+    ['קפואים', /קפוא|גליד|ארטיק|שלגון|מקלות קרח|פיצה קפוא|מלאווח|בצק עלים/],
+    ['מאפים ולחם', /לחם|פיתה|לחמני|באגט|בגט|חלה|קרואסון|רוגלך|עוגת|עוגה|מאפה|בורקס|טורטיה|מצה|לאפה|כעך|דחיסה|ג'בטה/],
+    ['חטיפים ומתוקים', /במבה|ביסלי|חטיף|שוקולד|סוכרי|ופל|עוגי|ביסקוויט|תפוצ|דגני בוקר|קורנפלקס|מסטיק|סוכריות|טופי|מרשמלו|פיצוחים|בוטנים|חטיפי|קליק|פסק זמן|כיף כף/],
+    ['משקאות', /קולה|מיץ|משקה|סודה|בירה|יין|תה |נס קפה|אנרגי|ספרינג|שתיה|תרכיז|פריגת|נביעות|מים מינרל|מי עדן|איס טי|נביעה|מאלט/],
+    ['ניקיון', /סבון כלים|אקונומיקה|ניקוי|מנקה|מטהר|אבקת כביסה|מרכך כביסה|ג'ל כביסה|ספוג|שקיות אשפה|שקית זבל|ניילון נצמד|כלור|סנו|מטליות|מגבוני רצפ|ריחן|בד טף/],
+    ['טואלטיקה', /נייר טואלט|טואלט|מגבונ|שמפו|מרכך שיער|דאודורנט|משחת שיניים|מברשת שיניים|תחבושת|חיתול|טמפון|סבון רחצה|אפטר שייב|קרם גוף|ג'ל רחצה|מי פה|אביזרי גילוח/],
+    ['יבשים ושימורים', /אורז|פסטה|מקרונ|ספגטי|קמח|סוכר|שמן|מלח|תבלי|שימור|טונה|רסק|קטשופ|מיונז|חומוס|טחינה|קטניו|עדש|שעועי|חומ|קוסקוס|פתית|דבש|ריבה|חומץ|רוטב|אבקת מרק|שקדי מרק|קורנפלור|סולת|בורגול|גריסים|אבקת אפי|שמרים|וניל|קקאו|נוטל/],
+  ];
+  function guessCategory(name) {
+    const s = name || '';
+    for (const [cat, re] of CAT_KEYWORDS) if (re.test(s)) return cat;
+    return null;
+  }
+
+  // Optional AI refinement using the user's OWN Anthropic key, stored only in
+  // this browser (never committed/sent anywhere but Anthropic) — same pattern
+  // as finance-tracker's ai-assistant.js. Results cached per name to save calls.
+  const AI_KEY_LS = 'sp_aiKey';
+  const AI_CAT_CACHE = 'sp_catCache';
+  const AI_MODEL = 'claude-haiku-4-5-20251001'; // fast + cheap for one-word classification
+  function getAiKey() { try { return localStorage.getItem(AI_KEY_LS) || ''; } catch (e) { return ''; } }
+  function setAiKey(k) { try { const v = (k || '').trim(); if (v) localStorage.setItem(AI_KEY_LS, v); else localStorage.removeItem(AI_KEY_LS); } catch (e) {} }
+  function hasAiKey() { return !!getAiKey(); }
+  let catCache = {};
+  try { catCache = JSON.parse(localStorage.getItem(AI_CAT_CACHE)) || {}; } catch (e) { catCache = {}; }
+  function cacheCat(name, cat) { catCache[normName(name)] = cat; try { localStorage.setItem(AI_CAT_CACHE, JSON.stringify(catCache)); } catch (e) {} }
+  /** Classify a product name into one of CATEGORIES. Returns null when no key
+   *  is set or the call fails (caller falls back to the heuristic / manual). */
+  async function classifyCategory(name) {
+    const q = (name || '').trim();
+    if (q.length < 2) return null;
+    const nn = normName(q);
+    if (catCache[nn]) return catCache[nn];
+    const key = getAiKey();
+    if (!key) return null;
+    try {
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-api-key': key,
+          'anthropic-version': '2023-06-01',
+          'anthropic-dangerous-direct-browser-access': 'true',
+        },
+        body: JSON.stringify({
+          model: AI_MODEL,
+          max_tokens: 24,
+          system: 'סווג מוצר ישראלי (מזון/בית) לאחת מהקטגוריות הבאות בלבד. החזר אך ורק את שם הקטגוריה המדויק כפי שמופיע ברשימה, ללא הסבר וללא טקסט נוסף.\nהקטגוריות:\n' + CATEGORIES.join('\n'),
+          messages: [{ role: 'user', content: q }],
+        }),
+      });
+      if (!res.ok) { console.warn('[SmartPantry] AI classify HTTP', res.status); return null; }
+      const j = await res.json();
+      const out = ((j.content && j.content[0] && j.content[0].text) || '').trim();
+      const match = CATEGORIES.find((c) => c === out)
+        || CATEGORIES.find((c) => out.includes(c) || c.includes(out));
+      if (match) { cacheCat(q, match); return match; }
+      return null;
+    } catch (e) { console.warn('[SmartPantry] AI classify failed', e); return null; }
+  }
+
   function contextualTip() {
     const s = summary();
     if (s.expiring > 0) {
@@ -459,5 +527,6 @@
     applyPrices, priceInfo, cheapestFor, basketComparison,
     chainNames, storesFor, currentStoreName, getStoreSel, setStore,
     applyCatalog, findByName, catalogSize,
+    guessCategory, classifyCategory, getAiKey, setAiKey, hasAiKey, AI_MODEL,
   };
 })(window);
