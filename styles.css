@@ -280,6 +280,9 @@ h1, h2, h3 { font-family: var(--font-head); margin: 0; }
 .bc-cov { font: 700 10px var(--font-body); color: var(--text-faint2); background: var(--surface-2); padding: 1px 6px; border-radius: 10px; }
 .bc-opt { margin-top: 11px; font: 600 12px var(--font-body); color: #7a5c12; text-align: center; background: var(--sun-soft); padding: 9px; border-radius: 12px; }
 .item-sub .cheap-at { font: 800 10px var(--font-head); color: var(--accent-deep); background: var(--accent-soft); padding: 2px 7px; border-radius: 11px; }
+.item-sub .price-tag.on-sale { color: #c0392b; }
+.item-sub .was-price { color: var(--text-faint2); text-decoration: line-through; font-weight: 700; font-size: 11px; }
+.item-sub .sale-tag { font: 800 10px var(--font-head); color: #fff; background: #e23b2e; padding: 2px 7px; border-radius: 11px; }
 .item .price { margin-inline-start: auto; text-align: left; }
 .item .price .now { font: 800 16px var(--font-head); color: var(--accent-deep); }
 

@@ -37,7 +37,17 @@ const RX = {
   sid: /<StoreI[dD]>([\s\S]*?)<\/StoreI[dD]>/,
   sname: /<StoreName>([\s\S]*?)<\/StoreName>/,
   csrf: /name="csrftoken"\s+content="([^"]+)"/,
+  promo: /<Promotion>([\s\S]*?)<\/Promotion>/g,
+  pend: /<PromotionEndDateTime>([\s\S]*?)<\/PromotionEndDateTime>/,
+  pstart: /<PromotionStartDateTime>([\s\S]*?)<\/PromotionStartDateTime>/,
+  coupon: /<AdditionalIsCoupon>([\s\S]*?)<\/AdditionalIsCoupon>/,
+  pdesc: /<PromotionDescription>([\s\S]*?)<\/PromotionDescription>/,
+  pitem: /<PromotionItem>([\s\S]*?)<\/PromotionItem>/g,
+  reward: /<RewardType>([\s\S]*?)<\/RewardType>/,
+  minqty: /<MinQty>([\s\S]*?)<\/MinQty>/,
+  dprice: /<DiscountedPrice>([\s\S]*?)<\/DiscountedPrice>/,
 };
+const g1 = (s, re) => (s.match(re) || [, ''])[1].trim();
 
 const stripBom = (s) => s.replace(/^﻿/, '');
 // Cerberus store files are UTF-16; everything else UTF-8.
@@ -64,6 +74,39 @@ function parseStores(xml) {
   }
   return stores;
 }
+/* Extract genuine single-unit SALES for tracked barcodes from a PromoFull XML.
+ * Real-data caveat: most "promotions" are coupon/club programs whose
+ * <DiscountedPrice> just echoes the regular price. We keep a promo only when it
+ * is: active now, not a coupon, RewardType=1 (a real discounted price),
+ * MinQty<=1 (priced per single unit), and STRICTLY below the regular price
+ * (`regular` from the same store's PriceFull). out: { barcode: {price, desc} }. */
+function parsePromos(xml, keep, regular) {
+  const now = Date.now();
+  const out = {};
+  for (const pm of xml.matchAll(RX.promo)) {
+    const blk = pm[1];
+    const end = Date.parse(g1(blk, RX.pend));
+    const start = Date.parse(g1(blk, RX.pstart));
+    if (end && end < now) continue;
+    if (start && start > now) continue;
+    if (g1(blk, RX.coupon) === '1') continue;
+    const desc = g1(blk, RX.pdesc).slice(0, 50);
+    for (const im of blk.matchAll(RX.pitem)) {
+      const it = im[1];
+      const code = g1(it, RX.code);
+      if (!keep.has(code)) continue;
+      if (g1(it, RX.reward) !== '1') continue;
+      if ((parseFloat(g1(it, RX.minqty)) || 0) > 1) continue;
+      const dp = parseFloat(g1(it, RX.dprice));
+      if (!(dp > 0)) continue;
+      const reg = regular[code];
+      if (reg != null && dp >= reg) continue;
+      const price = Math.round(dp * 100) / 100;
+      if (!out[code] || price < out[code].price) out[code] = { price, desc };
+    }
+  }
+  return out;
+}
 async function buf(url, headers) {
   const r = await fetch(url, { headers: { ...UA, ...headers } });
   if (!r.ok) throw new Error(`${r.status} ${url.slice(0, 50)}`);
@@ -87,14 +130,17 @@ async function shufLink(catID, storeId, kind) {
 async function fetchShufersal(keep) {
   const stores = parseStores(gunzip(await buf(await shufLink(5, 0, 'Stores'))));
   const ids = Object.keys(stores).slice(0, MAX);
-  const prices = {};
+  const prices = {}, promos = {};
   await pool(ids, async (id) => {
     const link = await shufLink(2, id, 'PriceFull');
     if (!link) return;
     const got = parsePrices(gunzip(await buf(link)), keep);
-    if (Object.keys(got).length) prices[id] = got;
+    if (!Object.keys(got).length) return;
+    prices[id] = got;
+    const plink = await shufLink(4, id, 'PromoFull'); // promos priced relative to this store's regulars
+    if (plink) { const sale = parsePromos(gunzip(await buf(plink)), keep, got); if (Object.keys(sale).length) promos[id] = sale; }
   });
-  return { stores, prices };
+  return { stores, prices, promos };
 }
 
 /* ---------- publishedprices (Cerberus) ---------- */
@@ -118,19 +164,26 @@ async function fetchCerberus(chain, keep) {
   const dl = (name) => buf(`${CERB}/file/d/${name}`, { Cookie: cookie() });
   const storesFile = files.find((n) => /Stores/.test(n));
   const stores = storesFile ? parseStores(decode(await dl(storesFile))) : {};
-  // newest PriceFull per store id (store id = dash-delimited token after the chain id)
-  const pfByStore = {};
-  for (const n of files.filter((f) => /^PriceFull/.test(f))) {
-    const id = (n.match(new RegExp(`${chain.chainId}-(?:\\d+-)?0*(\\d+)-`)) || [, ''])[1];
-    if (id && (!pfByStore[id] || n > pfByStore[id])) pfByStore[id] = n;
-  }
+  // newest PriceFull / PromoFull per store id (store id = dash-delimited token after the chain id)
+  const newestByStore = (re) => {
+    const m = {};
+    for (const n of files.filter((f) => re.test(f))) {
+      const id = (n.match(new RegExp(`${chain.chainId}-(?:\\d+-)?0*(\\d+)-`)) || [, ''])[1];
+      if (id && (!m[id] || n > m[id])) m[id] = n;
+    }
+    return m;
+  };
+  const pfByStore = newestByStore(/^PriceFull/);
+  const promoByStore = newestByStore(/^PromoFull/);
   const ids = Object.keys(stores).filter((id) => pfByStore[id]).slice(0, MAX);
-  const prices = {};
+  const prices = {}, promos = {};
   await pool(ids, async (id) => {
     const got = parsePrices(gunzip(await dl(pfByStore[id])), keep); // PriceFull files are gzipped
-    if (Object.keys(got).length) prices[id] = got;
+    if (!Object.keys(got).length) return;
+    prices[id] = got;
+    if (promoByStore[id]) { const sale = parsePromos(gunzip(await dl(promoByStore[id])), keep, got); if (Object.keys(sale).length) promos[id] = sale; }
   });
-  return { stores, prices };
+  return { stores, prices, promos };
 }
 
 (async function main() {
@@ -139,21 +192,26 @@ async function fetchCerberus(chain, keep) {
   const tracked = JSON.parse(fs.readFileSync(path.join(__dirname, 'tracked-barcodes.json'), 'utf8')).barcodes;
   const keep = new Set(tracked);
   // Local mode: parse pre-downloaded files from $PRICES_CACHE/<chainId>/ (a
-  // Stores file + <storeId>.gz PriceFull files), used by gen-prices-local.ps1.
+  // Stores file + <storeId>.gz PriceFull + optional <storeId>.promo.gz PromoFull
+  // files), used by gen-prices-local.ps1.
   const cacheDir = process.env.PRICES_CACHE;
   const fromCache = (ch) => {
     const dir = path.join(cacheDir, ch.chainId);
     const list = fs.existsSync(dir) ? fs.readdirSync(dir) : [];
     const sf = list.find((f) => /stores/i.test(f));
     const stores = sf ? parseStores(/\.gz$/.test(sf) ? gunzip(fs.readFileSync(path.join(dir, sf))) : decode(fs.readFileSync(path.join(dir, sf)))) : {};
-    const prices = {};
+    const prices = {}, promos = {};
     for (const f of list.filter((f) => /^\d+\.gz$/.test(f))) {
+      const id = f.replace('.gz', '');
       try {
         const got = parsePrices(gunzip(fs.readFileSync(path.join(dir, f))), keep);
-        if (Object.keys(got).length) prices[f.replace('.gz', '')] = got;
+        if (!Object.keys(got).length) continue;
+        prices[id] = got;
+        const pf = path.join(dir, `${id}.promo.gz`);
+        if (fs.existsSync(pf)) { const sale = parsePromos(gunzip(fs.readFileSync(pf)), keep, got); if (Object.keys(sale).length) promos[id] = sale; }
       } catch (e) { /* skip a corrupt/partial cached file */ }
     }
-    return { stores, prices };
+    return { stores, prices, promos };
   };
 
   const dest = path.join(__dirname, '..', 'prices.json');
@@ -168,8 +226,9 @@ async function fetchCerberus(chain, keep) {
       const res = cacheDir ? fromCache(ch)
         : ch.type === 'shufersal' ? await fetchShufersal(keep) : await fetchCerberus(ch, keep);
       if (Object.keys(res.prices).length) {
-        chains[ch.name] = { stores: res.stores, prices: res.prices };
-        console.log(`[prices] ${ch.name}: ${Object.keys(res.stores).length} branches, prices for ${Object.keys(res.prices).length}`);
+        chains[ch.name] = { stores: res.stores, prices: res.prices, promos: res.promos || {} };
+        const nSale = Object.values(res.promos || {}).reduce((s, o) => s + Object.keys(o).length, 0);
+        console.log(`[prices] ${ch.name}: ${Object.keys(res.stores).length} branches, prices for ${Object.keys(res.prices).length}, ${nSale} active sales`);
       } else {
         console.log(`[prices] ${ch.name}: no prices this run — kept ${chains[ch.name] ? 'existing' : 'nothing'}`);
       }

@@ -65,7 +65,9 @@
   function subText(it) {
     let s = `יש: ${it.currentQty} ${esc(it.unit)}`;
     if (it.lastPrice != null) {
-      s += ` · <span class="price-tag">₪${it.lastPrice}</span>`;
+      s += ` · <span class="price-tag${it.onSale ? ' on-sale' : ''}">₪${it.lastPrice}</span>`;
+      if (it.onSale && it.saleWas != null) s += ` <span class="was-price">₪${it.saleWas}</span>`;
+      if (it.onSale) s += ` <span class="sale-tag">🏷️ מבצע</span>`;
       if (it.cheapestChain) s += ` <span class="cheap-at">הכי זול ב${esc(it.cheapestChain)}</span>`;
     }
     return s;
@@ -436,13 +438,16 @@
   function storePickerHtml() {
     if (!SP.priceInfo || !SP.priceInfo()) return '';
     const sel = SP.getStoreSel();
+    const byName = (a, b) => a.name.localeCompare(b.name, 'he');
     const rows = SP.chainNames().map((name) => {
-      const stores = SP.storesFor(name).filter((s) => s.priced)
-        .sort((a, b) => a.name.localeCompare(b.name, 'he'));
+      const all = SP.storesFor(name);
+      const priced = all.filter((s) => s.priced).sort(byName);
+      const unpriced = all.filter((s) => !s.priced).sort(byName);
       const cur = sel[name] || '';
-      const opts = ['<option value="">— אוטומטי (הסניף הזול ביותר) —</option>']
-        .concat(stores.map((s) => `<option value="${esc(s.id)}"${s.id === cur ? ' selected' : ''}>${esc(s.name)}</option>`))
-        .join('');
+      let opts = '<option value="">— אוטומטי (הסניף הזול ביותר) —</option>';
+      opts += priced.map((s) => `<option value="${esc(s.id)}"${s.id === cur ? ' selected' : ''}>${esc(s.name)}</option>`).join('');
+      // show branches we have no prices for yet (e.g. ירושלים תלפיות) — disabled, so the user sees they exist and will fill on next refresh
+      if (unpriced.length) opts += `<optgroup label="ללא מחירים עדיין — ירוענו בריענון הבא">${unpriced.map((s) => `<option value="${esc(s.id)}" disabled>${esc(s.name)}</option>`).join('')}</optgroup>`;
       return `<div class="field"><label>${esc(name)}</label><select data-store-sel="${esc(name)}">${opts}</select></div>`;
     }).join('');
     return `

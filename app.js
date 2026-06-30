@@ -284,8 +284,8 @@
     if (!priceData) return;
     state.items.forEach((it) => {
       const c = cheapestFor(it.barcode);
-      if (c) { it.lastPrice = c.price; it.cheapestChain = c.chain; }
-      else { it.lastPrice = null; it.cheapestChain = null; }
+      if (c) { it.lastPrice = c.price; it.cheapestChain = c.chain; it.onSale = !!c.onSale; it.saleWas = c.onSale ? c.regular : null; }
+      else { it.lastPrice = null; it.cheapestChain = null; it.onSale = false; it.saleWas = null; }
     });
   }
   function priceInfo() {
@@ -304,14 +304,30 @@
     const sid = chainStoreId(name);
     return c && sid && c.prices[sid] ? c.prices[sid][bc] : undefined;
   }
-  /** Cheapest {chain, price} for a barcode across chains (at each chain's chosen branch). */
+  /** Active sale {price, desc} for a barcode at a chain's branch, or null. */
+  function promoAt(name, bc) {
+    const c = priceData && priceData.chains[name];
+    const sid = chainStoreId(name);
+    const pm = c && sid && c.promos && c.promos[sid] ? c.promos[sid][bc] : undefined;
+    return pm || null;
+  }
+  /** Effective unit price at a branch: the lower of regular and an active sale.
+   *  Returns {price, regular, onSale, desc} or null when neither exists. */
+  function effPriceAt(name, bc) {
+    const reg = priceAt(name, bc);
+    const pm = promoAt(name, bc);
+    if (reg == null && !pm) return null;
+    if (pm && (reg == null || pm.price < reg)) return { price: pm.price, regular: reg == null ? null : reg, onSale: true, desc: pm.desc };
+    return { price: reg, regular: reg, onSale: false, desc: null };
+  }
+  /** Cheapest {chain, price, onSale, regular, desc} for a barcode across chains. */
   function cheapestFor(barcode) {
     const bc = (barcode || '').trim();
     if (!bc || !priceData) return null;
     let best = null;
     for (const name of Object.keys(priceData.chains)) {
-      const p = priceAt(name, bc);
-      if (p != null && (best == null || p < best.price)) best = { chain: name, price: p };
+      const e = effPriceAt(name, bc);
+      if (e && e.price != null && (best == null || e.price < best.price)) best = { chain: name, ...e };
     }
     return best;
   }
@@ -329,9 +345,9 @@
     if (!basket.length) return null;
 
     const rows = Object.keys(priceData.chains).map((name) => {
-      let total = 0, covered = 0;
-      basket.forEach((bc) => { const p = priceAt(name, bc); if (p != null) { total += p; covered++; } });
-      return { name, total: Math.round(total * 100) / 100, covered, store: currentStoreName(name) };
+      let total = 0, covered = 0, sales = 0;
+      basket.forEach((bc) => { const e = effPriceAt(name, bc); if (e && e.price != null) { total += e.price; covered++; if (e.onSale) sales++; } });
+      return { name, total: Math.round(total * 100) / 100, covered, sales, store: currentStoreName(name) };
     }).sort((a, b) => (b.covered - a.covered) || (a.total - b.total));
 
     const full = rows.filter((r) => r.covered === basket.length);
