@@ -429,6 +429,10 @@ h1, h2, h3 { font-family: var(--font-head); margin: 0; }
 .field input:focus, .field select:focus { outline: none; border-color: var(--accent); }
 .field-row { display: flex; gap: 10px; }
 .field-row .field { flex: 1; }
+.store-picker .store-fields .field { margin-bottom: 10px; }
+.store-picker .store-fields .field:last-child { margin-bottom: 0; }
+.gps-status { font: 600 12.5px/1.45 var(--font-body); color: var(--text-dim); background: var(--bg); border-radius: 12px; padding: 9px 12px; margin-top: 9px; }
+.gps-status.warn { color: var(--warn, #b4690e); }
 .switch-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 0 14px; font: 600 14px var(--font-body); color: var(--text); }
 .switch { position: relative; width: 46px; height: 28px; flex-shrink: 0; }
 .switch input { opacity: 0; width: 0; height: 0; }

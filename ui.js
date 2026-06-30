@@ -432,6 +432,72 @@
     if (deferredInstall) return '<div class="install-hint"><span style="font-size:20px">📲</span><div>אפשר להתקין את האפליקציה למסך הבית — <a href="#" id="installBtn">התקנה</a></div></div>';
     return '<div class="install-hint"><span style="font-size:20px">📲</span><div>הוסיפו למסך הבית (שיתוף → הוסף למסך הבית) כדי שירוץ כמו אפליקציה.</div></div>';
   }
+  // ---------- branch picker (settings) ----------
+  function storePickerHtml() {
+    if (!SP.priceInfo || !SP.priceInfo()) return '';
+    const sel = SP.getStoreSel();
+    const rows = SP.chainNames().map((name) => {
+      const stores = SP.storesFor(name).filter((s) => s.priced)
+        .sort((a, b) => a.name.localeCompare(b.name, 'he'));
+      const cur = sel[name] || '';
+      const opts = ['<option value="">— אוטומטי (הסניף הזול ביותר) —</option>']
+        .concat(stores.map((s) => `<option value="${esc(s.id)}"${s.id === cur ? ' selected' : ''}>${esc(s.name)}</option>`))
+        .join('');
+      return `<div class="field"><label>${esc(name)}</label><select data-store-sel="${esc(name)}">${opts}</select></div>`;
+    }).join('');
+    return `
+      <div class="menu-item store-picker">
+        <div class="h">🏬 הסניפים שלי</div>
+        <div class="item-sub">בחרו את הסניף הקרוב אליכם בכל רשת — השוואת הסל תחושב לפי המחירים בסניפים האלה.</div>
+        <button class="btn sm ghost" id="gpsStores" style="margin-top:10px">📍 מצא לפי המיקום שלי</button>
+        <div id="gpsStatus" class="gps-status" hidden></div>
+        <div class="store-fields" style="margin-top:12px">${rows}</div>
+      </div>`;
+  }
+  // separators (hyphen/maqaf/quotes/punct) → space so "תל אביב-יפו" → ["תל","אביב","יפו"]
+  function normHeb(s) { return (s || '').replace(/["'`׳״.,/()־\-]/g, ' ').replace(/\s+/g, ' ').trim(); }
+  // forward match only: a city token must appear inside the store name (avoids "שלי" ⊂ "ירושלים" false hits)
+  function matchStoresToCity(city) {
+    const cityTokens = normHeb(city).split(' ').filter((t) => t.length >= 3);
+    const res = {};
+    SP.chainNames().forEach((chain) => {
+      const found = SP.storesFor(chain).filter((s) => s.priced).find((s) => {
+        const ns = normHeb(s.name);
+        return cityTokens.some((t) => ns.split(' ').includes(t));
+      });
+      if (found) res[chain] = found;
+    });
+    return res;
+  }
+  function setGps(msg, warn) {
+    const el = $('#gpsStatus'); if (!el) return;
+    el.hidden = false; el.textContent = msg; el.classList.toggle('warn', !!warn);
+  }
+  function locateStores() {
+    if (!navigator.geolocation) { setGps('המכשיר לא תומך באיתור מיקום — בחרו ידנית מהרשימות.', true); return; }
+    setGps('מאתר מיקום…');
+    navigator.geolocation.getCurrentPosition(async (pos) => {
+      try {
+        const { latitude, longitude } = pos.coords;
+        const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${latitude}&lon=${longitude}&accept-language=he`);
+        const j = await r.json();
+        const a = j.address || {};
+        const city = a.city || a.town || a.village || a.suburb || a.municipality || a.county || '';
+        if (!city) { setGps('לא זוהתה עיר מהמיקום — בחרו ידנית.', true); return; }
+        const matches = matchStoresToCity(city);
+        const applied = Object.keys(matches);
+        applied.forEach((chain) => {
+          SP.setStore(chain, matches[chain].id);
+          const elSel = document.querySelector(`select[data-store-sel="${chain}"]`);
+          if (elSel) elSel.value = matches[chain].id;
+        });
+        if (applied.length) setGps(`📍 ${city}: עודכנו ${applied.length} מתוך ${SP.chainNames().length} רשתות. בדקו ותקנו ידנית אם צריך.`);
+        else setGps(`📍 ${city}: לא נמצא סניף תואם אוטומטית — בחרו ידנית מהרשימות.`, true);
+      } catch (e) { setGps('שגיאה באיתור המיקום — בחרו ידנית.', true); }
+    }, () => setGps('לא ניתן לקבל מיקום (צריך לאשר הרשאת מיקום) — בחרו ידנית.', true),
+       { enableHighAccuracy: false, timeout: 10000, maximumAge: 600000 });
+  }
+
   function settingsSheet() {
     const s = SP.summary();
     const fbStatus = (window.SP_cloudSave) ? 'פעיל ✓' : 'כבוי (מקומי בלבד)';
@@ -444,6 +510,7 @@
         <div class="item-sub">${fbStatus} — למלא את firebase-config.js כדי לסנכרן בין כל המכשירים בבית בזמן אמת.</div></div>
       <div class="menu-item"><div class="h">💡 איך זה עובד</div>
         <div class="item-sub">לכל מוצר יש סף מינימום. כשהכמות יורדת מתחת לסף הוא קופץ אוטומטית לרשימה. המערכת לומדת את קצב הצריכה ומזכירה עוד לפני שנגמר.</div></div>
+      ${storePickerHtml()}
       <button class="btn danger sm" id="resetBtn" style="margin-top:8px">איפוס נתונים</button>`);
   }
 
@@ -489,6 +556,7 @@
     if (tabBtn) { switchTab(tabBtn.dataset.tab); return; }
     if (t.closest('#fab') || t.closest('#topAdd')) { addSheet(); return; }
     if (t.closest('#avatar') || t.closest('[data-settings]')) { settingsSheet(); return; }
+    if (t.closest('#gpsStores')) { locateStores(); return; }
     if (t === $('#backdrop')) { closeSheet(); return; }
 
     const go = t.closest('[data-go]');
@@ -561,6 +629,16 @@
       if (tab !== 'pantry') switchTab('pantry'); else renderPantry();
       const s = $('#search'); if (s) s.value = e.target.value; // keep in-view search in sync
     }
+  });
+
+  // branch picker (select change)
+  document.addEventListener('change', (e) => {
+    const sel = e.target.closest('[data-store-sel]');
+    if (!sel) return;
+    const chain = sel.getAttribute('data-store-sel');
+    SP.setStore(chain, sel.value || '');
+    const label = sel.value ? ((SP.storesFor(chain).find((s) => s.id === sel.value) || {}).name || 'עודכן') : 'אוטומטי';
+    toast(`✓ ${chain}: ${label}`);
   });
 
   // header shadow on scroll
