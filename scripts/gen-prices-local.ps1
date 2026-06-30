@@ -11,7 +11,7 @@
 # By default refreshes only the login (cerberus) chains — GitHub Actions can't
 # reach publishedprices.co.il, so those come from this Israeli machine while CI
 # keeps Shufersal fresh. Pass -IncludeShufersal to fetch Shufersal locally too.
-param([int]$N = 200, [switch]$IncludeShufersal)
+param([int]$N = 1, [switch]$IncludeShufersal)
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 $ErrorActionPreference = 'Stop'
 $cache = Join-Path $PSScriptRoot '.cache'

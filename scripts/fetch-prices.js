@@ -1,22 +1,25 @@
 #!/usr/bin/env node
-/* ===== Smart Pantry — multi-chain, multi-store price fetcher (Phase 1d) =====
+/* ===== Smart Pantry — full-catalog multi-chain price fetcher (Phase 1e) =====
  *
- * Builds a full branch directory + per-store prices for the tracked national
- * barcodes, so the app can let the user pick their branch per chain and compare
- * the basket at *their* stores. Writes prices.json:
+ * For each chain we fetch ONE representative store's FULL price file and keep
+ * every national (729-prefix) product — so ANY product the user adds gets a
+ * price, not just a hand-picked tracked list. We also harvest product NAMES to
+ * build catalog.json (the name→barcode index used by the add form).
  *
- *   { updated, tracked:[...],
- *     chains: { "<name>": { stores: { "<id>": {name} },
- *                           prices: { "<id>": { "<barcode>": price } } } } }
+ *   prices.json:  { updated, version:4,
+ *     chains: { "<name>": { store: {id,name},
+ *                           prices: { "<barcode>": price },
+ *                           promos: { "<barcode>": {price,desc} } } } }
+ *   catalog.json: { updated, count, items: [[barcode, name], ...] }   (union of chains)
  *
  * Sources (scripts/chains.json): "shufersal" = public portal; "cerberus" =
- * publishedprices.co.il login (public creds, empty password).
+ * publishedprices.co.il login (public creds, empty password). Optional per-chain
+ * "store" pins the representative branch id; empty = first available.
  *
- * Env:
- *   MAX_STORES  cap stores fetched per chain (local testing). Unset = all.
- *
- * Node 18+, zero deps. The heavy fetch really runs in CI; locally Netspark
- * breaks Node TLS to publishedprices (use scripts/gen-prices-local.ps1).
+ * Node 18+, zero deps. CI reaches Shufersal but NOT publishedprices (geo-block),
+ * so the cerberus chains are refreshed from an Israeli machine via
+ * scripts/gen-prices-local.ps1; both paths MERGE (a chain is only replaced when
+ * this run actually fetched it), so each keeps the other's chains intact.
  */
 'use strict';
 const zlib = require('node:zlib');
@@ -26,12 +29,12 @@ const path = require('node:path');
 const SHUF = 'https://prices.shufersal.co.il';
 const CERB = 'https://url.publishedprices.co.il';
 const UA = { 'User-Agent': 'Mozilla/5.0 (SmartPantry price fetcher)' };
-const MAX = process.env.MAX_STORES ? parseInt(process.env.MAX_STORES, 10) : Infinity;
-const CONCURRENCY = 8;
+const NATIONAL = /^729\d{10}$/; // Israeli national 13-digit barcode (crosses chains)
 
 const RX = {
   item: /<Item>([\s\S]*?)<\/Item>/g,
   code: /<ItemCode>([\s\S]*?)<\/ItemCode>/,
+  name: /<ItemN[ma]me>([\s\S]*?)<\/ItemN[ma]me>/, // ItemName (some feeds: ItemNme)
   price: /<ItemPrice>([\s\S]*?)<\/ItemPrice>/,
   store: /<Store>([\s\S]*?)<\/Store>/g,
   sid: /<StoreI[dD]>([\s\S]*?)<\/StoreI[dD]>/,
@@ -55,13 +58,18 @@ function decode(b) {
   if (b[0] === 0xff && b[1] === 0xfe) return stripBom(b.toString('utf16le'));
   return stripBom(b.toString('utf8'));
 }
-function parsePrices(xml, keep) {
+/* Parse a PriceFull XML: keep every national product, returning its price and
+ * (into `names`) its display name. out: { barcode: price }. */
+function parseCatalog(xml, names) {
   const out = {};
   for (const m of xml.matchAll(RX.item)) {
-    const code = (m[1].match(RX.code) || [, ''])[1].trim();
-    if (!keep.has(code)) continue;
-    const p = parseFloat((m[1].match(RX.price) || [, ''])[1]);
-    if (p > 0) out[code] = Math.round(p * 100) / 100;
+    const body = m[1];
+    const code = g1(body, RX.code);
+    if (!NATIONAL.test(code)) continue;
+    const p = parseFloat(g1(body, RX.price));
+    if (!(p > 0)) continue;
+    out[code] = Math.round(p * 100) / 100;
+    if (names && !names[code]) { const nm = g1(body, RX.name).replace(/\s+/g, ' '); if (nm) names[code] = nm; }
   }
   return out;
 }
@@ -74,12 +82,10 @@ function parseStores(xml) {
   }
   return stores;
 }
-/* Extract genuine single-unit SALES for tracked barcodes from a PromoFull XML.
- * Real-data caveat: most "promotions" are coupon/club programs whose
- * <DiscountedPrice> just echoes the regular price. We keep a promo only when it
- * is: active now, not a coupon, RewardType=1 (a real discounted price),
- * MinQty<=1 (priced per single unit), and STRICTLY below the regular price
- * (`regular` from the same store's PriceFull). out: { barcode: {price, desc} }. */
+/* Genuine single-unit SALES from a PromoFull XML, for the barcodes we priced.
+ * Most "promotions" are coupon/club echoes (DiscountedPrice == regular), so we
+ * keep only: active now, not a coupon, RewardType=1, MinQty<=1, and STRICTLY
+ * below the store's regular price. out: { barcode: {price, desc} }. */
 function parsePromos(xml, keep, regular) {
   const now = Date.now();
   const out = {};
@@ -114,33 +120,22 @@ async function buf(url, headers) {
 }
 const gunzip = (b) => zlib.gunzipSync(b).toString('utf8');
 
-/** Run async tasks with limited concurrency. */
-async function pool(items, fn, n = CONCURRENCY) {
-  let i = 0;
-  await Promise.all(Array.from({ length: Math.min(n, items.length) }, async () => {
-    while (i < items.length) { const idx = i++; try { await fn(items[idx]); } catch { /* skip store */ } }
-  }));
-}
-
 /* ---------- Shufersal (public) ---------- */
 async function shufLink(catID, storeId, kind) {
   const grid = (await buf(`${SHUF}/FileObject/UpdateCategory?catID=${catID}&storeId=${storeId}`)).toString('utf8');
   return [...grid.matchAll(/href="([^"]+\.gz[^"]*)"/g)].map((m) => m[1].replace(/&amp;/g, '&')).find((u) => u.includes(kind));
 }
-async function fetchShufersal(keep) {
+async function fetchShufersal(chain, names) {
   const stores = parseStores(gunzip(await buf(await shufLink(5, 0, 'Stores'))));
-  const ids = Object.keys(stores).slice(0, MAX);
-  const prices = {}, promos = {};
-  await pool(ids, async (id) => {
-    const link = await shufLink(2, id, 'PriceFull');
-    if (!link) return;
-    const got = parsePrices(gunzip(await buf(link)), keep);
-    if (!Object.keys(got).length) return;
-    prices[id] = got;
-    const plink = await shufLink(4, id, 'PromoFull'); // promos priced relative to this store's regulars
-    if (plink) { const sale = parsePromos(gunzip(await buf(plink)), keep, got); if (Object.keys(sale).length) promos[id] = sale; }
-  });
-  return { stores, prices, promos };
+  const repId = (chain.store && stores[chain.store]) ? chain.store : Object.keys(stores)[0];
+  if (!repId) throw new Error('no stores');
+  const link = await shufLink(2, repId, 'PriceFull');
+  if (!link) throw new Error('no PriceFull for rep store');
+  const prices = parseCatalog(gunzip(await buf(link)), names);
+  let promos = {};
+  const plink = await shufLink(4, repId, 'PromoFull');
+  if (plink) promos = parsePromos(gunzip(await buf(plink)), new Set(Object.keys(prices)), prices);
+  return { store: { id: repId, name: (stores[repId] || {}).name || '' }, prices, promos };
 }
 
 /* ---------- publishedprices (Cerberus) ---------- */
@@ -159,82 +154,85 @@ async function cerberusSession(user) {
   const files = (JSON.parse(await dir.text()).aaData || []).map((r) => r.name).filter(Boolean);
   return { cookie, files };
 }
-async function fetchCerberus(chain, keep) {
+async function fetchCerberus(chain, names) {
   const { cookie, files } = await cerberusSession(chain.user);
   const dl = (name) => buf(`${CERB}/file/d/${name}`, { Cookie: cookie() });
   const storesFile = files.find((n) => /Stores/.test(n));
   const stores = storesFile ? parseStores(decode(await dl(storesFile))) : {};
   // newest PriceFull / PromoFull per store id (store id = dash-delimited token after the chain id)
+  const idOf = (n) => (n.match(new RegExp(`${chain.chainId}-(?:\\d+-)?0*(\\d+)-`)) || [, ''])[1];
   const newestByStore = (re) => {
     const m = {};
-    for (const n of files.filter((f) => re.test(f))) {
-      const id = (n.match(new RegExp(`${chain.chainId}-(?:\\d+-)?0*(\\d+)-`)) || [, ''])[1];
-      if (id && (!m[id] || n > m[id])) m[id] = n;
-    }
+    for (const n of files.filter((f) => re.test(f))) { const id = idOf(n); if (id && (!m[id] || n > m[id])) m[id] = n; }
     return m;
   };
   const pfByStore = newestByStore(/^PriceFull/);
   const promoByStore = newestByStore(/^PromoFull/);
-  const ids = Object.keys(stores).filter((id) => pfByStore[id]).slice(0, MAX);
-  const prices = {}, promos = {};
-  await pool(ids, async (id) => {
-    const got = parsePrices(gunzip(await dl(pfByStore[id])), keep); // PriceFull files are gzipped
-    if (!Object.keys(got).length) return;
-    prices[id] = got;
-    if (promoByStore[id]) { const sale = parsePromos(gunzip(await dl(promoByStore[id])), keep, got); if (Object.keys(sale).length) promos[id] = sale; }
-  });
-  return { stores, prices, promos };
+  const repId = (chain.store && pfByStore[chain.store]) ? chain.store : Object.keys(pfByStore)[0];
+  if (!repId) throw new Error('no PriceFull files');
+  const prices = parseCatalog(gunzip(await dl(pfByStore[repId])), names);
+  let promos = {};
+  if (promoByStore[repId]) promos = parsePromos(gunzip(await dl(promoByStore[repId])), new Set(Object.keys(prices)), prices);
+  return { store: { id: repId, name: (stores[repId] || {}).name || '' }, prices, promos };
+}
+
+/* ---------- local cache mode (gen-prices-local.ps1) ---------- */
+// Parse pre-downloaded files from $PRICES_CACHE/<chainId>/: a Stores file + the
+// representative <storeId>.gz PriceFull (+ optional <storeId>.promo.gz). If
+// several stores were cached, the first is used as the representative.
+function fromCache(cacheDir, ch, names) {
+  const dir = path.join(cacheDir, ch.chainId);
+  const list = fs.existsSync(dir) ? fs.readdirSync(dir) : [];
+  const sf = list.find((f) => /stores/i.test(f));
+  const stores = sf ? parseStores(/\.gz$/.test(sf) ? gunzip(fs.readFileSync(path.join(dir, sf))) : decode(fs.readFileSync(path.join(dir, sf)))) : {};
+  const priceFiles = list.filter((f) => /^\d+\.gz$/.test(f)).sort();
+  for (const f of priceFiles) {
+    const id = f.replace('.gz', '');
+    try {
+      const prices = parseCatalog(gunzip(fs.readFileSync(path.join(dir, f))), names);
+      if (!Object.keys(prices).length) continue;
+      let promos = {};
+      const pf = path.join(dir, `${id}.promo.gz`);
+      if (fs.existsSync(pf)) promos = parsePromos(gunzip(fs.readFileSync(pf)), new Set(Object.keys(prices)), prices);
+      return { store: { id, name: (stores[id] || {}).name || '' }, prices, promos };
+    } catch (e) { /* skip a corrupt/partial cached file, try next */ }
+  }
+  throw new Error('no usable cached PriceFull');
 }
 
 (async function main() {
   const t0 = Date.now();
   const cfg = JSON.parse(fs.readFileSync(path.join(__dirname, 'chains.json'), 'utf8'));
-  const tracked = JSON.parse(fs.readFileSync(path.join(__dirname, 'tracked-barcodes.json'), 'utf8')).barcodes;
-  const keep = new Set(tracked);
-  // Local mode: parse pre-downloaded files from $PRICES_CACHE/<chainId>/ (a
-  // Stores file + <storeId>.gz PriceFull + optional <storeId>.promo.gz PromoFull
-  // files), used by gen-prices-local.ps1.
   const cacheDir = process.env.PRICES_CACHE;
-  const fromCache = (ch) => {
-    const dir = path.join(cacheDir, ch.chainId);
-    const list = fs.existsSync(dir) ? fs.readdirSync(dir) : [];
-    const sf = list.find((f) => /stores/i.test(f));
-    const stores = sf ? parseStores(/\.gz$/.test(sf) ? gunzip(fs.readFileSync(path.join(dir, sf))) : decode(fs.readFileSync(path.join(dir, sf)))) : {};
-    const prices = {}, promos = {};
-    for (const f of list.filter((f) => /^\d+\.gz$/.test(f))) {
-      const id = f.replace('.gz', '');
-      try {
-        const got = parsePrices(gunzip(fs.readFileSync(path.join(dir, f))), keep);
-        if (!Object.keys(got).length) continue;
-        prices[id] = got;
-        const pf = path.join(dir, `${id}.promo.gz`);
-        if (fs.existsSync(pf)) { const sale = parsePromos(gunzip(fs.readFileSync(pf)), keep, got); if (Object.keys(sale).length) promos[id] = sale; }
-      } catch (e) { /* skip a corrupt/partial cached file */ }
-    }
-    return { stores, prices, promos };
-  };
 
   const dest = path.join(__dirname, '..', 'prices.json');
-  // Merge: start from the existing file and only replace a chain when this run
-  // actually fetched prices for it. So CI (which can reach Shufersal but not the
-  // login portals) keeps the cerberus chains last fetched from an Israeli IP,
-  // and a local cerberus refresh keeps CI's full Shufersal data.
+  const catDest = path.join(__dirname, '..', 'catalog.json');
+  // Merge: seed chains + catalog names from the existing files; only replace a
+  // chain we actually fetched this run (CI=Shufersal, local=cerberus).
   let chains = {};
   try { chains = JSON.parse(fs.readFileSync(dest, 'utf8')).chains || {}; } catch (e) { chains = {}; }
+  const names = {};
+  try { for (const [b, n] of (JSON.parse(fs.readFileSync(catDest, 'utf8')).items || [])) names[b] = n; } catch (e) {}
+
   for (const ch of cfg.chains) {
     try {
-      const res = cacheDir ? fromCache(ch)
-        : ch.type === 'shufersal' ? await fetchShufersal(keep) : await fetchCerberus(ch, keep);
-      if (Object.keys(res.prices).length) {
-        chains[ch.name] = { stores: res.stores, prices: res.prices, promos: res.promos || {} };
-        const nSale = Object.values(res.promos || {}).reduce((s, o) => s + Object.keys(o).length, 0);
-        console.log(`[prices] ${ch.name}: ${Object.keys(res.stores).length} branches, prices for ${Object.keys(res.prices).length}, ${nSale} active sales`);
+      const res = cacheDir ? fromCache(cacheDir, ch, names)
+        : ch.type === 'shufersal' ? await fetchShufersal(ch, names) : await fetchCerberus(ch, names);
+      const n = Object.keys(res.prices).length;
+      if (n) {
+        chains[ch.name] = { store: res.store, prices: res.prices, promos: res.promos || {} };
+        const nSale = Object.keys(res.promos || {}).length;
+        console.log(`[prices] ${ch.name}: store ${res.store.id} "${res.store.name}", ${n} products, ${nSale} sales`);
       } else {
         console.log(`[prices] ${ch.name}: no prices this run — kept ${chains[ch.name] ? 'existing' : 'nothing'}`);
       }
     } catch (e) { console.warn(`[prices] ${ch.name}: SKIPPED (${e.message}) — kept ${chains[ch.name] ? 'existing' : 'nothing'}`); }
   }
-  fs.writeFileSync(dest, JSON.stringify({ updated: new Date().toISOString(), tracked, chains }));
-  console.log(`[prices] wrote ${dest} (${Object.keys(chains).length} chains) in ${Date.now() - t0}ms`);
+
+  fs.writeFileSync(dest, JSON.stringify({ updated: new Date().toISOString(), version: 4, chains }));
+  const items = Object.entries(names).map(([b, n]) => [b, n]);
+  fs.writeFileSync(catDest, JSON.stringify({ updated: new Date().toISOString(), count: items.length, items }));
+  const sizeKB = (s) => (fs.statSync(s).size / 1024).toFixed(0);
+  console.log(`[prices] wrote prices.json (${Object.keys(chains).length} chains, ${sizeKB(dest)}KB) + catalog.json (${items.length} products, ${sizeKB(catDest)}KB) in ${Date.now() - t0}ms`);
   if (!Object.keys(chains).length) process.exit(1);
 })().catch((e) => { console.error('[prices] FAILED:', e.message); process.exit(1); });

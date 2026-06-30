@@ -262,14 +262,12 @@
     return { amount: Math.round(amount * 100) / 100, count: promos.length, items: promos };
   }
 
-  // ---------- prices (Phase 1d — multi-chain, multi-store) ----------
-  // prices.json v3: { updated, tracked, chains: { name: { stores:{id:{name}}, prices:{id:{bc:price}} } } }
-  // Merged by barcode in memory only (never persisted). Each chain has a chosen
-  // branch (user pick saved locally, else the first priced branch).
+  // ---------- prices (Phase 1e — full catalog, representative branch) ----------
+  // prices.json v4: { updated, version:4, chains: { name: { store:{id,name},
+  //   prices:{bc:price}, promos:{bc:{price,desc}} } } }. Every national product
+  // is priced at one representative branch per chain, so ANY item the user adds
+  // gets a price. Merged by barcode in memory only (never persisted).
   let priceData = null;
-  const STORE_SEL_KEY = 'sp_storeSel';
-  let storeSel = {};
-  try { storeSel = JSON.parse(localStorage.getItem(STORE_SEL_KEY)) || {}; } catch (e) { storeSel = {}; }
 
   function applyPrices(data) {
     if (!data || !data.chains) return;
@@ -279,7 +277,7 @@
   }
   /** (Re)compute lastPrice/cheapestChain for every item from the loaded prices.
    *  Runs on price load AND after any item mutation (see persist), so a newly
-   *  added item with a tracked barcode gets its price immediately. */
+   *  added item with a known barcode gets its price immediately. */
   function repriceItems() {
     if (!priceData) return;
     state.items.forEach((it) => {
@@ -292,26 +290,16 @@
     if (!priceData) return null;
     return { updated: priceData.updated, chains: Object.keys(priceData.chains) };
   }
-  /** The branch used for a chain: the user's pick if it has prices, else the first priced branch. */
-  function chainStoreId(name) {
-    const c = priceData && priceData.chains[name];
-    if (!c || !c.prices) return null;
-    if (storeSel[name] && c.prices[storeSel[name]]) return storeSel[name];
-    return Object.keys(c.prices)[0] || null;
-  }
   function priceAt(name, bc) {
     const c = priceData && priceData.chains[name];
-    const sid = chainStoreId(name);
-    return c && sid && c.prices[sid] ? c.prices[sid][bc] : undefined;
+    return c && c.prices ? c.prices[bc] : undefined;
   }
-  /** Active sale {price, desc} for a barcode at a chain's branch, or null. */
+  /** Active sale {price, desc} for a barcode at a chain, or null. */
   function promoAt(name, bc) {
     const c = priceData && priceData.chains[name];
-    const sid = chainStoreId(name);
-    const pm = c && sid && c.promos && c.promos[sid] ? c.promos[sid][bc] : undefined;
-    return pm || null;
+    return (c && c.promos && c.promos[bc]) || null;
   }
-  /** Effective unit price at a branch: the lower of regular and an active sale.
+  /** Effective unit price: the lower of regular and an active sale.
    *  Returns {price, regular, onSale, desc} or null when neither exists. */
   function effPriceAt(name, bc) {
     const reg = priceAt(name, bc);
@@ -332,11 +320,15 @@
     return best;
   }
 
-  /** Compare the whole shopping basket across chains (at each chain's chosen branch):
-   *  total + coverage per chain, cheapest fully-covering chain, saving vs priciest,
-   *  and the "buy-each-where-cheapest" optimum. */
+  /** Compare the basket across chains. Because each chain is priced at one
+   *  representative branch and branches carry different SKUs, coverage varies —
+   *  so the winner is ranked on the COMMON basket (items priced in EVERY chain),
+   *  an apples-to-apples figure. Also returns each chain's full covered total +
+   *  the split-shopping optimum (each item at its cheapest chain). */
   function basketComparison() {
     if (!priceData) return null;
+    const chains = Object.keys(priceData.chains);
+    const round2 = (x) => Math.round(x * 100) / 100;
     const basket = [];
     state.items.filter(isNeeded).forEach((it) => {
       const bc = (it.barcode || '').trim();
@@ -344,43 +336,44 @@
     });
     if (!basket.length) return null;
 
-    const rows = Object.keys(priceData.chains).map((name) => {
-      let total = 0, covered = 0, sales = 0;
-      basket.forEach((bc) => { const e = effPriceAt(name, bc); if (e && e.price != null) { total += e.price; covered++; if (e.onSale) sales++; } });
-      return { name, total: Math.round(total * 100) / 100, covered, sales, store: currentStoreName(name) };
-    }).sort((a, b) => (b.covered - a.covered) || (a.total - b.total));
+    // common = priced in every chain → comparable head-to-head
+    const common = basket.filter((bc) => chains.every((name) => effPriceAt(name, bc)));
 
-    const full = rows.filter((r) => r.covered === basket.length);
-    const ranked = (full.length ? full : rows).slice().sort((a, b) => a.total - b.total);
-    const winner = ranked[0];
-    const baseline = ranked[ranked.length - 1];
-    const optimalTotal = Math.round(basket.reduce((s, bc) => s + cheapestFor(bc).price, 0) * 100) / 100;
+    const rows = chains.map((name) => {
+      let total = 0, covered = 0, sales = 0, commonTotal = 0;
+      basket.forEach((bc) => {
+        const e = effPriceAt(name, bc);
+        if (e && e.price != null) { total += e.price; covered++; if (e.onSale) sales++; if (common.includes(bc)) commonTotal += e.price; }
+      });
+      return { name, total: round2(total), covered, sales, commonTotal: round2(commonTotal), store: currentStoreName(name) };
+    });
+
+    const optimalTotal = round2(basket.reduce((s, bc) => s + cheapestFor(bc).price, 0));
+
+    // rank by the common-basket total (only meaningful when there's a common set)
+    const ranked = rows.slice().sort((a, b) => a.commonTotal - b.commonTotal);
+    const winner = common.length ? ranked[0] : null;
+    const baseline = common.length ? ranked[ranked.length - 1] : null;
+    const rowsByCov = rows.slice().sort((a, b) => (b.covered - a.covered) || (a.total - b.total));
 
     return {
-      size: basket.length, rows, winner, baseline,
-      saves: Math.round((baseline.total - winner.total) * 100) / 100,
-      fullCoverage: full.length > 0, optimalTotal,
+      size: basket.length, commonSize: common.length,
+      rows: rowsByCov, winner, baseline,
+      saves: winner ? round2(baseline.commonTotal - winner.commonTotal) : 0,
+      optimalTotal,
     };
   }
 
-  // ---------- store selection (for the branch picker) ----------
+  // ---------- chains / representative branches ----------
   function chainNames() { return priceData ? Object.keys(priceData.chains) : []; }
-  /** All branches of a chain: [{id, name, priced}] (priced = we have prices for it). */
-  function storesFor(name) {
+  /** The representative branch a chain's prices come from: {id, name} or null. */
+  function chainStore(name) {
     const c = priceData && priceData.chains[name];
-    if (!c) return [];
-    return Object.entries(c.stores || {}).map(([id, s]) => ({ id, name: s.name, priced: !!(c.prices && c.prices[id]) }));
+    return c && c.store ? c.store : null;
   }
   function currentStoreName(name) {
-    const c = priceData && priceData.chains[name];
-    const sid = chainStoreId(name);
-    return c && sid && c.stores && c.stores[sid] ? c.stores[sid].name : null;
-  }
-  function getStoreSel() { return Object.assign({}, storeSel); }
-  function setStore(name, id) {
-    if (id) storeSel[name] = id; else delete storeSel[name];
-    localStorage.setItem(STORE_SEL_KEY, JSON.stringify(storeSel));
-    if (priceData) applyPrices(priceData);
+    const s = chainStore(name);
+    return s ? s.name : null;
   }
 
   // ---------- name → barcode catalog ----------
@@ -525,7 +518,7 @@
     status, isNeeded, avgDaysBetween, predictedDaysLeft, daysToExpiry, isExpiringSoon,
     shoppingList, summary, savingsSummary, contextualTip,
     applyPrices, priceInfo, cheapestFor, basketComparison,
-    chainNames, storesFor, currentStoreName, getStoreSel, setStore,
+    chainNames, chainStore, currentStoreName,
     applyCatalog, findByName, catalogSize,
     guessCategory, classifyCategory, getAiKey, setAiKey, hasAiKey, AI_MODEL,
   };

@@ -77,22 +77,27 @@
   function basketPanel() {
     const b = SP.basketComparison && SP.basketComparison();
     if (!b) return '';
+    // when there's a common set, rank/show by the comparable common-basket total
+    const useCommon = !!b.winner && b.commonSize > 0;
     const rows = b.rows.map((r) => {
-      const win = r.name === b.winner.name;
+      const win = b.winner && r.name === b.winner.name;
       const partial = r.covered < b.size;
+      const fig = useCommon ? r.commonTotal : r.total;
       return `<div class="bc-row ${win ? 'win' : ''}">
         <span class="bc-name">${win ? '🏆 ' : ''}${esc(r.name)}</span>
-        <span class="bc-total">${fmtShekel(r.total)}${partial ? `<span class="bc-cov">${r.covered}/${b.size}</span>` : ''}</span>
+        <span class="bc-total">${fmtShekel(fig)}${partial ? `<span class="bc-cov">${r.covered}/${b.size}</span>` : ''}</span>
       </div>`;
     }).join('');
+    const head = b.winner
+      ? `<div class="bc-lbl">${useCommon && b.commonSize < b.size ? `${b.commonSize} פריטים משותפים · ` : `הסל שלך · ${b.size} פריטים · `}הכי זול ב־</div>
+         <div class="bc-win">${esc(b.winner.name)} <span class="bc-win-amt">${fmtShekel(b.winner.commonTotal)}</span></div>
+         ${b.saves > 0 ? `<div class="bc-save">חוסך ${fmtShekel(b.saves)} מול ${esc(b.baseline.name)}</div>` : ''}`
+      : `<div class="bc-lbl">הסל שלך · ${b.size} פריטים</div>
+         <div class="bc-sub">המחיר הכי זול לכל פריט מסומן על הפריט</div>`;
     return `<div class="basket-cmp">
-      <div class="bc-head">
-        <div class="bc-lbl">הסל שלך · ${b.size} פריטים · הכי זול ב־</div>
-        <div class="bc-win">${esc(b.winner.name)} <span class="bc-win-amt">${fmtShekel(b.winner.total)}</span></div>
-        ${b.saves > 0 ? `<div class="bc-save">חוסך ${fmtShekel(b.saves)} מול ${esc(b.baseline.name)}</div>` : ''}
-      </div>
+      <div class="bc-head">${head}</div>
       <div class="bc-rows">${rows}</div>
-      ${b.optimalTotal < b.winner.total ? `<div class="bc-opt">💡 קנייה מפוצלת (כל פריט בזול ביותר): ${fmtShekel(b.optimalTotal)}</div>` : ''}
+      ${b.size > 1 && b.optimalTotal > 0 ? `<div class="bc-opt">💡 קנייה מפוצלת (כל פריט בזול ביותר): ${fmtShekel(b.optimalTotal)}</div>` : ''}
     </div>`;
   }
 
@@ -439,11 +444,15 @@
   }
 
   // catalog autocomplete under the name field: type a name → pick → barcode auto-fills
+  const SUG_LIMIT = 25;
   function renderNameSug(q) {
     const box = $('#nameSug'); if (!box) return;
-    const m = (SP.findByName ? SP.findByName(q, 6) : []);
+    const m = (SP.findByName ? SP.findByName(q, SUG_LIMIT + 1) : []);
     if (!m.length || !q.trim()) { box.hidden = true; box.innerHTML = ''; return; }
-    box.innerHTML = m.map((r) => `<button type="button" class="name-sug-item" data-bc="${esc(r.barcode)}" data-nm="${esc(r.name)}">${esc(r.name)}</button>`).join('');
+    const more = m.length > SUG_LIMIT;
+    let html = m.slice(0, SUG_LIMIT).map((r) => `<button type="button" class="name-sug-item" data-bc="${esc(r.barcode)}" data-nm="${esc(r.name)}">${esc(r.name)}</button>`).join('');
+    if (more) html += '<div class="name-sug-more">תוצאות רבות — הוסיפו עוד מילה (מותג/אחוז/גודל) לחידוד</div>';
+    box.innerHTML = html;
     box.hidden = false;
   }
   function addSheet() {
@@ -465,73 +474,21 @@
     if (deferredInstall) return '<div class="install-hint"><span style="font-size:20px">📲</span><div>אפשר להתקין את האפליקציה למסך הבית — <a href="#" id="installBtn">התקנה</a></div></div>';
     return '<div class="install-hint"><span style="font-size:20px">📲</span><div>הוסיפו למסך הבית (שיתוף → הוסף למסך הבית) כדי שירוץ כמו אפליקציה.</div></div>';
   }
-  // ---------- branch picker (settings) ----------
+  // ---------- representative branches (settings, read-only) ----------
+  // v4 prices come from one representative branch per chain (full catalog), so
+  // this is informational — every product is priced, comparison is chain-level.
   function storePickerHtml() {
     if (!SP.priceInfo || !SP.priceInfo()) return '';
-    const sel = SP.getStoreSel();
-    const byName = (a, b) => a.name.localeCompare(b.name, 'he');
     const rows = SP.chainNames().map((name) => {
-      const all = SP.storesFor(name);
-      const priced = all.filter((s) => s.priced).sort(byName);
-      const unpriced = all.filter((s) => !s.priced).sort(byName);
-      const cur = sel[name] || '';
-      let opts = '<option value="">— אוטומטי (הסניף הזול ביותר) —</option>';
-      opts += priced.map((s) => `<option value="${esc(s.id)}"${s.id === cur ? ' selected' : ''}>${esc(s.name)}</option>`).join('');
-      // show branches we have no prices for yet (e.g. ירושלים תלפיות) — disabled, so the user sees they exist and will fill on next refresh
-      if (unpriced.length) opts += `<optgroup label="ללא מחירים עדיין — ירוענו בריענון הבא">${unpriced.map((s) => `<option value="${esc(s.id)}" disabled>${esc(s.name)}</option>`).join('')}</optgroup>`;
-      return `<div class="field"><label>${esc(name)}</label><select data-store-sel="${esc(name)}">${opts}</select></div>`;
+      const st = SP.chainStore ? SP.chainStore(name) : null;
+      return `<div class="store-row"><span class="store-chain">${esc(name)}</span><span class="store-branch">${st ? esc(st.name) : '—'}</span></div>`;
     }).join('');
     return `
       <div class="menu-item store-picker">
-        <div class="h">🏬 הסניפים שלי</div>
-        <div class="item-sub">בחרו את הסניף הקרוב אליכם בכל רשת — השוואת הסל תחושב לפי המחירים בסניפים האלה.</div>
-        <button class="btn sm ghost" id="gpsStores" style="margin-top:10px">📍 מצא לפי המיקום שלי</button>
-        <div id="gpsStatus" class="gps-status" hidden></div>
-        <div class="store-fields" style="margin-top:12px">${rows}</div>
+        <div class="h">🏬 מקור המחירים</div>
+        <div class="item-sub">המחירים נמשכים מסניף מייצג בכל רשת — כל מוצר מתומחר, וההשוואה היא ברמת הרשת.</div>
+        <div class="store-list" style="margin-top:10px">${rows}</div>
       </div>`;
-  }
-  // separators (hyphen/maqaf/quotes/punct) → space so "תל אביב-יפו" → ["תל","אביב","יפו"]
-  function normHeb(s) { return (s || '').replace(/["'`׳״.,/()־\-]/g, ' ').replace(/\s+/g, ' ').trim(); }
-  // forward match only: a city token must appear inside the store name (avoids "שלי" ⊂ "ירושלים" false hits)
-  function matchStoresToCity(city) {
-    const cityTokens = normHeb(city).split(' ').filter((t) => t.length >= 3);
-    const res = {};
-    SP.chainNames().forEach((chain) => {
-      const found = SP.storesFor(chain).filter((s) => s.priced).find((s) => {
-        const ns = normHeb(s.name);
-        return cityTokens.some((t) => ns.split(' ').includes(t));
-      });
-      if (found) res[chain] = found;
-    });
-    return res;
-  }
-  function setGps(msg, warn) {
-    const el = $('#gpsStatus'); if (!el) return;
-    el.hidden = false; el.textContent = msg; el.classList.toggle('warn', !!warn);
-  }
-  function locateStores() {
-    if (!navigator.geolocation) { setGps('המכשיר לא תומך באיתור מיקום — בחרו ידנית מהרשימות.', true); return; }
-    setGps('מאתר מיקום…');
-    navigator.geolocation.getCurrentPosition(async (pos) => {
-      try {
-        const { latitude, longitude } = pos.coords;
-        const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${latitude}&lon=${longitude}&accept-language=he`);
-        const j = await r.json();
-        const a = j.address || {};
-        const city = a.city || a.town || a.village || a.suburb || a.municipality || a.county || '';
-        if (!city) { setGps('לא זוהתה עיר מהמיקום — בחרו ידנית.', true); return; }
-        const matches = matchStoresToCity(city);
-        const applied = Object.keys(matches);
-        applied.forEach((chain) => {
-          SP.setStore(chain, matches[chain].id);
-          const elSel = document.querySelector(`select[data-store-sel="${chain}"]`);
-          if (elSel) elSel.value = matches[chain].id;
-        });
-        if (applied.length) setGps(`📍 ${city}: עודכנו ${applied.length} מתוך ${SP.chainNames().length} רשתות. בדקו ותקנו ידנית אם צריך.`);
-        else setGps(`📍 ${city}: לא נמצא סניף תואם אוטומטית — בחרו ידנית מהרשימות.`, true);
-      } catch (e) { setGps('שגיאה באיתור המיקום — בחרו ידנית.', true); }
-    }, () => setGps('לא ניתן לקבל מיקום (צריך לאשר הרשאת מיקום) — בחרו ידנית.', true),
-       { enableHighAccuracy: false, timeout: 10000, maximumAge: 600000 });
   }
 
   // AI category settings: the user's own Anthropic key, stored only in this browser.
@@ -606,7 +563,6 @@
     if (tabBtn) { switchTab(tabBtn.dataset.tab); return; }
     if (t.closest('#fab') || t.closest('#topAdd')) { addSheet(); return; }
     if (t.closest('#avatar') || t.closest('[data-settings]')) { settingsSheet(); return; }
-    if (t.closest('#gpsStores')) { locateStores(); return; }
     const sug = t.closest('.name-sug-item');
     if (sug) {
       if ($('#s-name')) $('#s-name').value = sug.dataset.nm;
@@ -699,15 +655,9 @@
     }
   });
 
-  // branch picker (select change)
+  // category manual-touch tracking (respect a manual pick over auto-classify)
   document.addEventListener('change', (e) => {
-    if (e.target.id === 's-cat') { catTouched = true; return; } // respect a manual category pick
-    const sel = e.target.closest('[data-store-sel]');
-    if (!sel) return;
-    const chain = sel.getAttribute('data-store-sel');
-    SP.setStore(chain, sel.value || '');
-    const label = sel.value ? ((SP.storesFor(chain).find((s) => s.id === sel.value) || {}).name || 'עודכן') : 'אוטומטי';
-    toast(`✓ ${chain}: ${label}`);
+    if (e.target.id === 's-cat') { catTouched = true; }
   });
 
   // header shadow on scroll
