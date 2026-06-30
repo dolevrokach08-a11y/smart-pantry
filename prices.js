@@ -16,4 +16,12 @@
       if (meta) console.info(`[SmartPantry] prices: ${meta.count} from ${meta.chain}${meta.storeName ? ' · ' + meta.storeName : ''} (updated ${meta.updated})`);
     })
     .catch(() => { /* offline / no file — ignore */ });
+
+  // name→barcode catalog (lets the app resolve a typed product name to a barcode)
+  if (typeof SP.applyCatalog === 'function') {
+    fetch('catalog.json', { cache: 'no-cache' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => { if (data) { SP.applyCatalog(data); console.info(`[SmartPantry] catalog: ${data.count} products`); } })
+      .catch(() => { /* optional — ignore */ });
+  }
 })();

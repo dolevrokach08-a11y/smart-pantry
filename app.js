@@ -383,6 +383,38 @@
     if (priceData) applyPrices(priceData);
   }
 
+  // ---------- name → barcode catalog ----------
+  let catalog = []; // [[barcode, name], ...]
+  function applyCatalog(data) { catalog = (data && Array.isArray(data.items)) ? data.items : []; }
+  const normName = (s) => (s || '').toLowerCase()
+    .replace(/[֑-ׇ]/g, '')          // strip Hebrew nikud/cantillation
+    .replace(/["'`׳״.,()\/\-]/g, ' ')
+    .replace(/\s+/g, ' ').trim();
+  /** Fuzzy name→product search over the catalog. Returns [{barcode, name}]. */
+  function findByName(query, limit = 6) {
+    const nq = normName(query);
+    if (nq.length < 2 || !catalog.length) return [];
+    const toks = nq.split(' ').filter((t) => t.length >= 2);
+    if (!toks.length) return [];
+    const out = [];
+    for (let i = 0; i < catalog.length; i++) {
+      const name = catalog[i][1];
+      const nn = normName(name);
+      const words = nn.split(' ');
+      let score = 0, matched = 0;
+      for (const t of toks) {
+        if (words.includes(t)) { score += 3; matched++; }
+        else if (nn.includes(t)) { score += 1; matched++; }
+      }
+      if (matched < toks.length) continue;       // require all query tokens to appear
+      if (nn.startsWith(toks[0])) score += 2;     // prefer name starting with the query
+      out.push({ barcode: catalog[i][0], name, score, len: name.length });
+    }
+    out.sort((a, b) => (b.score - a.score) || (a.len - b.len));
+    return out.slice(0, limit).map(({ barcode, name }) => ({ barcode, name }));
+  }
+  function catalogSize() { return catalog.length; }
+
   function contextualTip() {
     const s = summary();
     if (s.expiring > 0) {
@@ -426,5 +458,6 @@
     shoppingList, summary, savingsSummary, contextualTip,
     applyPrices, priceInfo, cheapestFor, basketComparison,
     chainNames, storesFor, currentStoreName, getStoreSel, setStore,
+    applyCatalog, findByName, catalogSize,
   };
 })(window);

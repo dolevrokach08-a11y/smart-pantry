@@ -393,7 +393,8 @@
   function formFields(it) {
     it = it || { name: '', category: 'אחר', unit: 'יחידות', currentQty: 1, minThreshold: 1, expiryDate: '', barcode: '', isStaple: false };
     return `
-      <div class="field"><label>שם המוצר</label><input type="text" id="s-name" value="${esc(it.name)}" placeholder="למשל: יוגורט" /></div>
+      <div class="field name-field"><label>שם המוצר</label><input type="text" id="s-name" value="${esc(it.name)}" placeholder="למשל: חלב תנובה 3%" autocomplete="off" />
+        <div id="nameSug" class="name-sug" hidden></div></div>
       <div class="field-row">
         <div class="field"><label>קטגוריה</label><select id="s-cat">${catOptions(it.category)}</select></div>
         <div class="field"><label>יחידה</label><select id="s-unit">${unitOptions(it.unit)}</select></div>
@@ -406,7 +407,7 @@
         <div class="field"><label>תפוגה (לא חובה)</label><input type="date" id="s-exp" value="${it.expiryDate ? String(it.expiryDate).slice(0, 10) : ''}" /></div>
         <div class="field"><label>ברקוד (לא חובה)</label><input type="text" id="s-barcode" value="${esc(it.barcode || '')}" placeholder="למחירים" /></div>
       </div>
-      <div class="field-hint">💡 ברקוד מאפשר השוואת מחירים בין הרשתות. מוצרים נפוצים (חלב, במבה, שמן…) כבר מזוהים אוטומטית.</div>
+      <div class="field-hint">💡 הקלידו שם מוצר ובחרו מהרשימה — הברקוד יתמלא לבד ויאפשר השוואת מחירים בין הרשתות.</div>
       <div class="switch-row"><span>מוצר קבוע (תמיד שיהיה בבית)</span>
         <span class="switch"><input type="checkbox" id="s-staple" ${it.isStaple ? 'checked' : ''} /></span></div>`;
   }
@@ -416,6 +417,14 @@
       currentQty: parseFloat($('#s-qty').value) || 0, minThreshold: parseFloat($('#s-min').value) || 0,
       expiryDate: $('#s-exp').value || null, barcode: $('#s-barcode').value.trim(), isStaple: $('#s-staple').checked,
     };
+  }
+  // catalog autocomplete under the name field: type a name → pick → barcode auto-fills
+  function renderNameSug(q) {
+    const box = $('#nameSug'); if (!box) return;
+    const m = (SP.findByName ? SP.findByName(q, 6) : []);
+    if (!m.length || !q.trim()) { box.hidden = true; box.innerHTML = ''; return; }
+    box.innerHTML = m.map((r) => `<button type="button" class="name-sug-item" data-bc="${esc(r.barcode)}" data-nm="${esc(r.name)}">${esc(r.name)}</button>`).join('');
+    box.hidden = false;
   }
   function addSheet() {
     openSheet(`<h2>הוספת מוצר</h2>${formFields()}<button class="btn" id="s-add">הוסף למזווה</button>`);
@@ -562,6 +571,14 @@
     if (t.closest('#fab') || t.closest('#topAdd')) { addSheet(); return; }
     if (t.closest('#avatar') || t.closest('[data-settings]')) { settingsSheet(); return; }
     if (t.closest('#gpsStores')) { locateStores(); return; }
+    const sug = t.closest('.name-sug-item');
+    if (sug) {
+      if ($('#s-name')) $('#s-name').value = sug.dataset.nm;
+      if ($('#s-barcode')) $('#s-barcode').value = sug.dataset.bc;
+      const box = $('#nameSug'); if (box) { box.hidden = true; box.innerHTML = ''; }
+      toast('✓ זוהה — הברקוד מולא');
+      return;
+    }
     if (t === $('#backdrop')) { closeSheet(); return; }
 
     const go = t.closest('[data-go]');
@@ -628,6 +645,7 @@
 
   // pantry search (input delegation)
   document.addEventListener('input', (e) => {
+    if (e.target.id === 's-name') { renderNameSug(e.target.value); return; }
     if (e.target.id === 'search') { pf.search = e.target.value; renderPantry(); }
     else if (e.target.id === 'topSearch') {
       pf.search = e.target.value;
