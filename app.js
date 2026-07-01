@@ -396,6 +396,14 @@
     const nm = catIndex.byBarcode.get(bc);
     return nm ? (catIndex.nameCount.get(nm) || 0) > 1 : false;
   }
+  /** Catalog display name for a barcode (reverse lookup), or null. Used by the
+   *  scanner to fill the product name from a scanned code. */
+  function nameForBarcode(barcode) {
+    const bc = (barcode || '').trim();
+    if (!bc || !catalog.length) return null;
+    if (!catIndex) buildCatIndex();
+    return catIndex.byBarcode.get(bc) || null;
+  }
   const normName = (s) => (s || '').toLowerCase()
     .replace(/[֑-ׇ]/g, '')          // strip Hebrew nikud/cantillation
     .replace(/["'`׳״.,()\/\-]/g, ' ')
@@ -536,7 +544,7 @@
     shoppingList, summary, savingsSummary, contextualTip,
     applyPrices, priceInfo, cheapestFor, basketComparison,
     chainNames, chainStore, currentStoreName,
-    applyCatalog, findByName, catalogSize, nameAmbiguous,
+    applyCatalog, findByName, catalogSize, nameAmbiguous, nameForBarcode,
     guessCategory, classifyCategory, getAiKey, setAiKey, hasAiKey, AI_MODEL,
   };
 })(window);

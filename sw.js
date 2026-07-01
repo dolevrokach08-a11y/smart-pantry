@@ -1,6 +1,6 @@
 /* Smart Pantry service worker — network-first to avoid stale code,
  * cache fallback for offline. Bump CACHE to force a refresh. */
-const CACHE = 'smart-pantry-v10';
+const CACHE = 'smart-pantry-v11';
 const ASSETS = [
   './', './index.html', './styles.css', './app.js', './ui.js', './prices.js',
   './manifest.webmanifest', './icon.svg', './landing.html',

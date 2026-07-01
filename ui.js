@@ -420,9 +420,11 @@
       </div>
       <div class="field-row">
         <div class="field"><label>תפוגה (לא חובה)</label><input type="date" id="s-exp" value="${it.expiryDate ? String(it.expiryDate).slice(0, 10) : ''}" /></div>
-        <div class="field"><label>ברקוד (לא חובה)</label><input type="text" id="s-barcode" value="${esc(it.barcode || '')}" placeholder="למחירים" /></div>
+        <div class="field"><label>ברקוד (לא חובה)</label>
+          <div class="bc-input"><input type="text" id="s-barcode" value="${esc(it.barcode || '')}" placeholder="למחירים" />${('BarcodeDetector' in window) ? '<button type="button" id="s-scan" class="scan-btn" title="סרוק ברקוד">📷 סרוק</button>' : ''}</div>
+        </div>
       </div>
-      <div class="field-hint">💡 הקלידו שם מוצר ובחרו מהרשימה — הברקוד יתמלא לבד ויאפשר השוואת מחירים בין הרשתות.</div>
+      <div class="field-hint">💡 הקלידו שם מוצר ובחרו מהרשימה${('BarcodeDetector' in window) ? ' (או סרקו ברקוד)' : ''} — הברקוד יתמלא לבד ויאפשר השוואת מחירים בין הרשתות.</div>
       <div class="switch-row"><span>מוצר קבוע (תמיד שיהיה בבית)</span>
         <span class="switch"><input type="checkbox" id="s-staple" ${it.isStaple ? 'checked' : ''} /></span></div>`;
   }
@@ -574,6 +576,50 @@
     if (su) su.textContent = on ? 'מחובר — מסונכרן בזמן אמת' : 'לחצו להגדרת סנכרון בית';
   }
 
+  // ---------- barcode scanner (Android/Chrome via native BarcodeDetector) ----------
+  let scanStream = null, scanRAF = null;
+  async function startScan() {
+    if (!('BarcodeDetector' in window)) { toast('סריקה נתמכת בכרום/אנדרואיד'); return; }
+    let detector;
+    try { detector = new window.BarcodeDetector({ formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e'] }); }
+    catch (e) { toast('סריקה לא נתמכת במכשיר'); return; }
+    const overlay = document.createElement('div');
+    overlay.className = 'scan-overlay';
+    overlay.innerHTML = `<video class="scan-video" playsinline muted></video>
+      <div class="scan-frame"></div>
+      <div class="scan-hint">כוונו את הברקוד למסגרת</div>
+      <button class="scan-cancel" type="button">ביטול</button>`;
+    document.body.appendChild(overlay);
+    const video = overlay.querySelector('.scan-video');
+    const stop = () => {
+      if (scanRAF) { cancelAnimationFrame(scanRAF); scanRAF = null; }
+      if (scanStream) { scanStream.getTracks().forEach((t) => t.stop()); scanStream = null; }
+      overlay.remove();
+    };
+    overlay.querySelector('.scan-cancel').addEventListener('click', stop);
+    try { scanStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } }); }
+    catch (e) { toast('אין גישה למצלמה'); stop(); return; }
+    video.srcObject = scanStream;
+    await video.play().catch(() => {});
+    const tick = async () => {
+      if (!scanStream) return;                       // stopped
+      try {
+        const codes = await detector.detect(video);
+        const hit = codes.find((c) => /^\d{8,13}$/.test(c.rawValue));
+        if (hit) { stop(); onScanned(hit.rawValue); return; }
+      } catch (e) { /* transient decode error — keep scanning */ }
+      if (scanStream) scanRAF = requestAnimationFrame(tick);
+    };
+    scanRAF = requestAnimationFrame(tick);
+  }
+  function onScanned(code) {
+    const bc = $('#s-barcode'); if (bc) bc.value = code;
+    const nm = SP.nameForBarcode ? SP.nameForBarcode(code) : null;
+    const nameInp = $('#s-name');
+    if (nm && nameInp && !nameInp.value.trim()) { nameInp.value = nm; autoClassify(nm, true); }
+    toast(nm ? `✓ זוהה: ${nm}` : `✓ ברקוד נסרק: ${code} · לא בקטלוג`);
+  }
+
   // ---------- events ----------
   document.addEventListener('click', (e) => {
     const t = e.target;
@@ -582,6 +628,7 @@
     if (tabBtn) { switchTab(tabBtn.dataset.tab); return; }
     if (t.closest('#fab') || t.closest('#topAdd')) { addSheet(); return; }
     if (t.closest('#avatar') || t.closest('[data-settings]')) { settingsSheet(); return; }
+    if (t.closest('#s-scan')) { startScan(); return; }
     const sug = t.closest('.name-sug-item');
     if (sug) {
       if ($('#s-name')) $('#s-name').value = sug.dataset.nm;
