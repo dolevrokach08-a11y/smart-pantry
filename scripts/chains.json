@@ -1,9 +1,9 @@
 {
-  "_comment": "Price sources for the multi-chain basket comparison. 'shufersal' = public portal (no login). 'cerberus' = publishedprices.co.il login (public credentials mandated by the price-transparency law; empty password). store='' picks the first PriceFull file for that chain.",
+  "_comment": "Price sources for the multi-chain basket comparison. 'shufersal' = public portal (no login). 'cerberus' = publishedprices.co.il login (public credentials mandated by the price-transparency law; empty password). 'store' pins the representative branch id (Dolev's nearest branch); empty = first PriceFull file for that chain.",
   "chains": [
-    { "name": "שופרסל",  "type": "shufersal", "chainId": "7290027600007", "store": "" },
-    { "name": "רמי לוי",  "type": "cerberus",  "chainId": "7290058140886", "user": "RamiLevi",  "store": "" },
-    { "name": "אושר עד",  "type": "cerberus",  "chainId": "7290103152017", "user": "osherad",   "store": "" },
-    { "name": "יוחננוף",  "type": "cerberus",  "chainId": "7290803800003", "user": "yohananof", "store": "" }
+    { "name": "שופרסל",  "type": "shufersal", "chainId": "7290027600007", "store": "45", "storeName": "דיל ירושלים- תלפיות" },
+    { "name": "רמי לוי",  "type": "cerberus",  "chainId": "7290058140886", "user": "RamiLevi",  "store": "23", "storeName": "גוש עציון" },
+    { "name": "אושר עד",  "type": "cerberus",  "chainId": "7290103152017", "user": "osherad",   "store": "26", "storeName": "תלפיות" },
+    { "name": "יוחננוף",  "type": "cerberus",  "chainId": "7290803800003", "user": "yohananof", "store": "20", "storeName": "ירושלים תלפיות" }
   ]
 }

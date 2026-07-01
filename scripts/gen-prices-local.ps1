@@ -33,7 +33,7 @@ foreach ($ch in $cfg) {
       $u = @([regex]::Matches($grid, 'href="([^"]+Stores[^"]+\.gz[^"]*)"') | ForEach-Object { $_.Groups[1].Value -replace '&amp;','&' })[0]
       Invoke-WebRequest $u -OutFile (Join-Path $dir 'stores.gz') -TimeoutSec 60
       $sx = [Text.Encoding]::UTF8.GetString((Gunzip ([IO.File]::ReadAllBytes((Join-Path $dir 'stores.gz')))))
-      $ids = @([regex]::Matches($sx, '<StoreID>0*(\d+)</StoreID>') | ForEach-Object { $_.Groups[1].Value } | Select-Object -Unique -First $N)
+      $ids = if ($ch.store) { @($ch.store) } else { @([regex]::Matches($sx, '<StoreID>0*(\d+)</StoreID>') | ForEach-Object { $_.Groups[1].Value } | Select-Object -Unique -First $N) }
       foreach ($id in $ids) {
         $g2 = (Invoke-WebRequest "$SHUF/FileObject/UpdateCategory?catID=2&storeId=$id" -UseBasicParsing -TimeoutSec 60).Content
         $pf = @([regex]::Matches($g2, 'href="([^"]+PriceFull[^"]+\.gz[^"]*)"') | ForEach-Object { $_.Groups[1].Value -replace '&amp;','&' })[0]
@@ -59,7 +59,8 @@ foreach ($ch in $cfg) {
       foreach ($pg in @($j.aaData | Where-Object { $_.name -match '^PromoFull' } | ForEach-Object {
         $m = & $idFrom $_.name; if ($m.Success) { [pscustomobject]@{ id = $m.Groups[1].Value; name = $_.name } }
       } | Group-Object id)) { $promoByStore[$pg.Name] = @($pg.Group | Sort-Object name)[-1].name }
-      foreach ($g in @($groups | Select-Object -First $N)) {
+      $pick = if ($ch.store) { @($groups | Where-Object { $_.Name -eq $ch.store }) } else { @($groups | Select-Object -First $N) }
+      foreach ($g in $pick) {
         $name = @($g.Group | Sort-Object name)[-1].name
         Invoke-WebRequest "$CERB/file/d/$name" -WebSession $s -OutFile (Join-Path $dir ("{0}.gz" -f $g.Name)) -TimeoutSec 90
         if ($promoByStore.ContainsKey($g.Name)) {
