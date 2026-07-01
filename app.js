@@ -378,7 +378,32 @@
 
   // ---------- name → barcode catalog ----------
   let catalog = []; // [[barcode, name], ...]
-  function applyCatalog(data) { catalog = (data && Array.isArray(data.items)) ? data.items : []; }
+  let catIndex = null; // { byBarcode: Map<bc,name>, nameCount: Map<name,count> } — built lazily
+  function applyCatalog(data) { catalog = (data && Array.isArray(data.items)) ? data.items : []; catIndex = null; }
+  function buildCatIndex() {
+    const byBarcode = new Map(), nameCount = new Map();
+    for (const [bc, nm] of catalog) { byBarcode.set(bc, nm); nameCount.set(nm, (nameCount.get(nm) || 0) + 1); }
+    catIndex = { byBarcode, nameCount };
+  }
+  /** True when this barcode's display name is shared by other barcodes too — the
+   *  feed truncates names to ~20 chars and loose produce / in-store bakery get a
+   *  store-minted code per chain, so a shared name means the price may not be for
+   *  the exact product meant. Used to show such prices as "מחיר משתנה". */
+  function nameAmbiguous(barcode) {
+    const bc = (barcode || '').trim();
+    if (!bc || !catalog.length) return false;
+    if (!catIndex) buildCatIndex();
+    const nm = catIndex.byBarcode.get(bc);
+    return nm ? (catIndex.nameCount.get(nm) || 0) > 1 : false;
+  }
+  /** Catalog display name for a barcode (reverse lookup), or null. Used by the
+   *  scanner to fill the product name from a scanned code. */
+  function nameForBarcode(barcode) {
+    const bc = (barcode || '').trim();
+    if (!bc || !catalog.length) return null;
+    if (!catIndex) buildCatIndex();
+    return catIndex.byBarcode.get(bc) || null;
+  }
   const normName = (s) => (s || '').toLowerCase()
     .replace(/[֑-ׇ]/g, '')          // strip Hebrew nikud/cantillation
     .replace(/["'`׳״.,()\/\-]/g, ' ')
@@ -519,7 +544,7 @@
     shoppingList, summary, savingsSummary, contextualTip,
     applyPrices, priceInfo, cheapestFor, basketComparison,
     chainNames, chainStore, currentStoreName,
-    applyCatalog, findByName, catalogSize,
+    applyCatalog, findByName, catalogSize, nameAmbiguous, nameForBarcode,
     guessCategory, classifyCategory, getAiKey, setAiKey, hasAiKey, AI_MODEL,
   };
 })(window);

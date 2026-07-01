@@ -65,10 +65,15 @@
   function subText(it) {
     let s = `יש: ${it.currentQty} ${esc(it.unit)}`;
     if (it.lastPrice != null) {
-      s += ` · <span class="price-tag${it.onSale ? ' on-sale' : ''}">₪${it.lastPrice}</span>`;
+      // ambiguous barcode (shared name → loose produce / bakery / duplicate GTIN):
+      // the number isn't reliably for this exact product, so flag it as variable
+      // instead of asserting a "cheapest chain".
+      const approx = SP.nameAmbiguous && SP.nameAmbiguous(it.barcode);
+      s += ` · <span class="price-tag${it.onSale ? ' on-sale' : ''}${approx ? ' approx' : ''}">₪${it.lastPrice}</span>`;
       if (it.onSale && it.saleWas != null) s += ` <span class="was-price">₪${it.saleWas}</span>`;
       if (it.onSale) s += ` <span class="sale-tag">🏷️ מבצע</span>`;
-      if (it.cheapestChain) s += ` <span class="cheap-at">הכי זול ב${esc(it.cheapestChain)}</span>`;
+      if (approx) s += ` <span class="var-price" title="ברקוד לא ייחודי (תוצרת/מאפה/כפילות) — המחיר עשוי לא להיות למוצר המדויק">מחיר משתנה</span>`;
+      else if (it.cheapestChain) s += ` <span class="cheap-at">הכי זול ב${esc(it.cheapestChain)}</span>`;
     }
     return s;
   }
@@ -98,6 +103,7 @@
       <div class="bc-head">${head}</div>
       <div class="bc-rows">${rows}</div>
       ${b.size > 1 && b.optimalTotal > 0 ? `<div class="bc-opt">💡 קנייה מפוצלת (כל פריט בזול ביותר): ${fmtShekel(b.optimalTotal)}</div>` : ''}
+      <div class="bc-note">מחיר מסניף מייצג אחד לכל רשת · ייתכן הבדל בין סניפים</div>
     </div>`;
   }
 
@@ -267,10 +273,14 @@
     if (basketItems.length) {
       breakdown = `<div class="items" style="margin-top:10px">${basketItems.map((it) => {
         const c = SP.cheapestFor(it.barcode);
+        const approx = SP.nameAmbiguous && SP.nameAmbiguous(it.barcode);
+        const tag = approx
+          ? `<span class="var-price" title="ברקוד לא ייחודי (תוצרת/מאפה/כפילות) — המחיר עשוי לא להיות למוצר המדויק">מחיר משתנה</span>`
+          : `<span class="cheap-at">הכי זול ב${esc(c.chain)}</span>`;
         return `<div class="item">
           <div class="emoji-badge ${badgeClass(it)}">${SP.itemEmoji(it)}</div>
-          <div class="item-main"><div class="item-name">${esc(it.name)}</div><div class="item-sub"><span class="cheap-at">הכי זול ב${esc(c.chain)}</span></div></div>
-          <div class="price"><div class="now">₪${c.price}</div></div>
+          <div class="item-main"><div class="item-name">${esc(it.name)}</div><div class="item-sub">${tag}</div></div>
+          <div class="price"><div class="now${approx ? ' approx' : ''}">₪${c.price}</div></div>
         </div>`;
       }).join('')}</div>`;
     } else {
@@ -410,9 +420,11 @@
       </div>
       <div class="field-row">
         <div class="field"><label>תפוגה (לא חובה)</label><input type="date" id="s-exp" value="${it.expiryDate ? String(it.expiryDate).slice(0, 10) : ''}" /></div>
-        <div class="field"><label>ברקוד (לא חובה)</label><input type="text" id="s-barcode" value="${esc(it.barcode || '')}" placeholder="למחירים" /></div>
+        <div class="field"><label>ברקוד (לא חובה)</label>
+          <div class="bc-input"><input type="text" id="s-barcode" value="${esc(it.barcode || '')}" placeholder="למחירים" />${('BarcodeDetector' in window) ? '<button type="button" id="s-scan" class="scan-btn" title="סרוק ברקוד">📷 סרוק</button>' : ''}</div>
+        </div>
       </div>
-      <div class="field-hint">💡 הקלידו שם מוצר ובחרו מהרשימה — הברקוד יתמלא לבד ויאפשר השוואת מחירים בין הרשתות.</div>
+      <div class="field-hint">💡 הקלידו שם מוצר ובחרו מהרשימה${('BarcodeDetector' in window) ? ' (או סרקו ברקוד)' : ''} — הברקוד יתמלא לבד ויאפשר השוואת מחירים בין הרשתות.</div>
       <div class="switch-row"><span>מוצר קבוע (תמיד שיהיה בבית)</span>
         <span class="switch"><input type="checkbox" id="s-staple" ${it.isStaple ? 'checked' : ''} /></span></div>`;
   }
@@ -450,7 +462,16 @@
     const m = (SP.findByName ? SP.findByName(q, SUG_LIMIT + 1) : []);
     if (!m.length || !q.trim()) { box.hidden = true; box.innerHTML = ''; return; }
     const more = m.length > SUG_LIMIT;
-    let html = m.slice(0, SUG_LIMIT).map((r) => `<button type="button" class="name-sug-item" data-bc="${esc(r.barcode)}" data-nm="${esc(r.name)}">${esc(r.name)}</button>`).join('');
+    // Show each match's cheapest price + chain: many feed names are truncated to
+    // ~20 chars, so different products (or duplicate barcodes) can look identical
+    // by name — the price is what lets the user tell them apart.
+    const sugPrice = (bc) => {
+      const c = SP.cheapestFor ? SP.cheapestFor(bc) : null;
+      if (!c || c.price == null) return '';
+      const p = '₪' + (Math.round(c.price * 100) / 100).toFixed(2).replace(/\.?0+$/, '');
+      return `<span class="name-sug-price">${p}${c.onSale ? ' 🏷️' : ''} · ${esc(c.chain)}</span>`;
+    };
+    let html = m.slice(0, SUG_LIMIT).map((r) => `<button type="button" class="name-sug-item" data-bc="${esc(r.barcode)}" data-nm="${esc(r.name)}"><span class="name-sug-nm">${esc(r.name)}</span>${sugPrice(r.barcode)}</button>`).join('');
     if (more) html += '<div class="name-sug-more">תוצאות רבות — הוסיפו עוד מילה (מותג/אחוז/גודל) לחידוד</div>';
     box.innerHTML = html;
     box.hidden = false;
@@ -555,6 +576,50 @@
     if (su) su.textContent = on ? 'מחובר — מסונכרן בזמן אמת' : 'לחצו להגדרת סנכרון בית';
   }
 
+  // ---------- barcode scanner (Android/Chrome via native BarcodeDetector) ----------
+  let scanStream = null, scanRAF = null;
+  async function startScan() {
+    if (!('BarcodeDetector' in window)) { toast('סריקה נתמכת בכרום/אנדרואיד'); return; }
+    let detector;
+    try { detector = new window.BarcodeDetector({ formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e'] }); }
+    catch (e) { toast('סריקה לא נתמכת במכשיר'); return; }
+    const overlay = document.createElement('div');
+    overlay.className = 'scan-overlay';
+    overlay.innerHTML = `<video class="scan-video" playsinline muted></video>
+      <div class="scan-frame"></div>
+      <div class="scan-hint">כוונו את הברקוד למסגרת</div>
+      <button class="scan-cancel" type="button">ביטול</button>`;
+    document.body.appendChild(overlay);
+    const video = overlay.querySelector('.scan-video');
+    const stop = () => {
+      if (scanRAF) { cancelAnimationFrame(scanRAF); scanRAF = null; }
+      if (scanStream) { scanStream.getTracks().forEach((t) => t.stop()); scanStream = null; }
+      overlay.remove();
+    };
+    overlay.querySelector('.scan-cancel').addEventListener('click', stop);
+    try { scanStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } }); }
+    catch (e) { toast('אין גישה למצלמה'); stop(); return; }
+    video.srcObject = scanStream;
+    await video.play().catch(() => {});
+    const tick = async () => {
+      if (!scanStream) return;                       // stopped
+      try {
+        const codes = await detector.detect(video);
+        const hit = codes.find((c) => /^\d{8,13}$/.test(c.rawValue));
+        if (hit) { stop(); onScanned(hit.rawValue); return; }
+      } catch (e) { /* transient decode error — keep scanning */ }
+      if (scanStream) scanRAF = requestAnimationFrame(tick);
+    };
+    scanRAF = requestAnimationFrame(tick);
+  }
+  function onScanned(code) {
+    const bc = $('#s-barcode'); if (bc) bc.value = code;
+    const nm = SP.nameForBarcode ? SP.nameForBarcode(code) : null;
+    const nameInp = $('#s-name');
+    if (nm && nameInp && !nameInp.value.trim()) { nameInp.value = nm; autoClassify(nm, true); }
+    toast(nm ? `✓ זוהה: ${nm}` : `✓ ברקוד נסרק: ${code} · לא בקטלוג`);
+  }
+
   // ---------- events ----------
   document.addEventListener('click', (e) => {
     const t = e.target;
@@ -563,6 +628,7 @@
     if (tabBtn) { switchTab(tabBtn.dataset.tab); return; }
     if (t.closest('#fab') || t.closest('#topAdd')) { addSheet(); return; }
     if (t.closest('#avatar') || t.closest('[data-settings]')) { settingsSheet(); return; }
+    if (t.closest('#s-scan')) { startScan(); return; }
     const sug = t.closest('.name-sug-item');
     if (sug) {
       if ($('#s-name')) $('#s-name').value = sug.dataset.nm;

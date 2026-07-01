@@ -284,6 +284,19 @@ h1, h2, h3 { font-family: var(--font-head); margin: 0; }
 .item-sub .price-tag.on-sale { color: #c0392b; }
 .item-sub .was-price { color: var(--text-faint2); text-decoration: line-through; font-weight: 700; font-size: 11px; }
 .item-sub .sale-tag { font: 800 10px var(--font-head); color: #fff; background: #e23b2e; padding: 2px 7px; border-radius: 11px; }
+.item-sub .price-tag.approx { color: var(--text-dim); font-weight: 700; }
+.item-sub .var-price { font: 800 10px var(--font-head); color: var(--text-dim); background: var(--surface-2); padding: 2px 7px; border-radius: 11px; }
+.bc-note { margin-top: 9px; font: 600 11px var(--font-body); color: var(--text-dim); text-align: center; }
+.price .now.approx { color: var(--text-dim); }
+/* barcode scan button + camera overlay */
+.bc-input { display: flex; gap: 8px; align-items: stretch; }
+.bc-input input { flex: 1; min-width: 0; }
+.scan-btn { flex-shrink: 0; background: var(--accent-soft); color: var(--accent-deep); border: 0; border-radius: var(--r-sm); padding: 0 14px; font: 800 13px var(--font-head); cursor: pointer; white-space: nowrap; }
+.scan-overlay { position: fixed; inset: 0; z-index: 100; background: #000; display: flex; align-items: center; justify-content: center; }
+.scan-video { width: 100%; height: 100%; object-fit: cover; }
+.scan-frame { position: absolute; width: 74%; max-width: 340px; aspect-ratio: 1.6 / 1; border: 3px solid #fff; border-radius: 16px; box-shadow: 0 0 0 100vmax rgba(0,0,0,.45); }
+.scan-hint { position: absolute; top: 13%; color: #fff; font: 700 15px var(--font-body); text-shadow: 0 1px 4px rgba(0,0,0,.7); }
+.scan-cancel { position: absolute; bottom: 9%; background: #fff; color: #111; border: 0; border-radius: 999px; padding: 12px 30px; font: 800 15px var(--font-head); cursor: pointer; }
 .item .price { margin-inline-start: auto; text-align: left; }
 .item .price .now { font: 800 16px var(--font-head); color: var(--accent-deep); }
 
@@ -433,7 +446,9 @@ h1, h2, h3 { font-family: var(--font-head); margin: 0; }
 .field input:focus, .field select:focus { outline: none; border-color: var(--accent); }
 .name-field { position: relative; }
 .name-sug { position: absolute; z-index: 30; top: 100%; inset-inline: 0; margin-top: 4px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-sm); box-shadow: var(--shadow); max-height: 244px; overflow-y: auto; }
-.name-sug-item { display: block; width: 100%; text-align: right; background: none; border: 0; border-bottom: 1px solid var(--border); padding: 11px 13px; font: 600 14px var(--font-body); color: var(--text); cursor: pointer; }
+.name-sug-item { display: flex; align-items: center; gap: 10px; width: 100%; text-align: right; background: none; border: 0; border-bottom: 1px solid var(--border); padding: 11px 13px; font: 600 14px var(--font-body); color: var(--text); cursor: pointer; }
+.name-sug-nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.name-sug-price { flex-shrink: 0; font: 600 13px var(--font-body); color: var(--text-dim); white-space: nowrap; }
 .name-sug-item:last-child { border-bottom: 0; }
 .name-sug-item:active, .name-sug-item:hover { background: var(--surface-2); }
 .field-row { display: flex; gap: 10px; }
