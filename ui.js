@@ -450,7 +450,16 @@
     const m = (SP.findByName ? SP.findByName(q, SUG_LIMIT + 1) : []);
     if (!m.length || !q.trim()) { box.hidden = true; box.innerHTML = ''; return; }
     const more = m.length > SUG_LIMIT;
-    let html = m.slice(0, SUG_LIMIT).map((r) => `<button type="button" class="name-sug-item" data-bc="${esc(r.barcode)}" data-nm="${esc(r.name)}">${esc(r.name)}</button>`).join('');
+    // Show each match's cheapest price + chain: many feed names are truncated to
+    // ~20 chars, so different products (or duplicate barcodes) can look identical
+    // by name — the price is what lets the user tell them apart.
+    const sugPrice = (bc) => {
+      const c = SP.cheapestFor ? SP.cheapestFor(bc) : null;
+      if (!c || c.price == null) return '';
+      const p = '₪' + (Math.round(c.price * 100) / 100).toFixed(2).replace(/\.?0+$/, '');
+      return `<span class="name-sug-price">${p}${c.onSale ? ' 🏷️' : ''} · ${esc(c.chain)}</span>`;
+    };
+    let html = m.slice(0, SUG_LIMIT).map((r) => `<button type="button" class="name-sug-item" data-bc="${esc(r.barcode)}" data-nm="${esc(r.name)}"><span class="name-sug-nm">${esc(r.name)}</span>${sugPrice(r.barcode)}</button>`).join('');
     if (more) html += '<div class="name-sug-more">תוצאות רבות — הוסיפו עוד מילה (מותג/אחוז/גודל) לחידוד</div>';
     box.innerHTML = html;
     box.hidden = false;

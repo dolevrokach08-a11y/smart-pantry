@@ -433,7 +433,9 @@ h1, h2, h3 { font-family: var(--font-head); margin: 0; }
 .field input:focus, .field select:focus { outline: none; border-color: var(--accent); }
 .name-field { position: relative; }
 .name-sug { position: absolute; z-index: 30; top: 100%; inset-inline: 0; margin-top: 4px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-sm); box-shadow: var(--shadow); max-height: 244px; overflow-y: auto; }
-.name-sug-item { display: block; width: 100%; text-align: right; background: none; border: 0; border-bottom: 1px solid var(--border); padding: 11px 13px; font: 600 14px var(--font-body); color: var(--text); cursor: pointer; }
+.name-sug-item { display: flex; align-items: center; gap: 10px; width: 100%; text-align: right; background: none; border: 0; border-bottom: 1px solid var(--border); padding: 11px 13px; font: 600 14px var(--font-body); color: var(--text); cursor: pointer; }
+.name-sug-nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.name-sug-price { flex-shrink: 0; font: 600 13px var(--font-body); color: var(--text-dim); white-space: nowrap; }
 .name-sug-item:last-child { border-bottom: 0; }
 .name-sug-item:active, .name-sug-item:hover { background: var(--surface-2); }
 .field-row { display: flex; gap: 10px; }

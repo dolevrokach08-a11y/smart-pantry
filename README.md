@@ -40,7 +40,9 @@ npx serve .
 
 - **Phase 1b — מחירים:** GitHub Action שמושך XML של הרשתות (חוק שקיפות מחירים), מתאים
   לפי ברקוד, כותב מחירים + מבצעים ל-Firestore. (שלד `scripts/`, `.github/workflows/`.)
-- **Phase 2 — וואטסאפ:** WhatsApp Cloud API → Cloudflare Worker → Firestore.
+- **אולי מתישהו — וואטסאפ:** WhatsApp Cloud API → Cloudflare Worker → Firestore.
+  מוקפא בכוונה: לכידה מהירה כבר מכוסה ע"י ה-PWA, והזנת טקסט חופשי יורשת את בעיית
+  מיפוי שם→מוצר בלי סורק/הצעות. לשקול רק אם בני-בית לא-מתקינים ירצו להוסיף בהודעה.
 
 ## מבנה
 
