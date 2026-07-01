@@ -65,10 +65,15 @@
   function subText(it) {
     let s = `יש: ${it.currentQty} ${esc(it.unit)}`;
     if (it.lastPrice != null) {
-      s += ` · <span class="price-tag${it.onSale ? ' on-sale' : ''}">₪${it.lastPrice}</span>`;
+      // ambiguous barcode (shared name → loose produce / bakery / duplicate GTIN):
+      // the number isn't reliably for this exact product, so flag it as variable
+      // instead of asserting a "cheapest chain".
+      const approx = SP.nameAmbiguous && SP.nameAmbiguous(it.barcode);
+      s += ` · <span class="price-tag${it.onSale ? ' on-sale' : ''}${approx ? ' approx' : ''}">₪${it.lastPrice}</span>`;
       if (it.onSale && it.saleWas != null) s += ` <span class="was-price">₪${it.saleWas}</span>`;
       if (it.onSale) s += ` <span class="sale-tag">🏷️ מבצע</span>`;
-      if (it.cheapestChain) s += ` <span class="cheap-at">הכי זול ב${esc(it.cheapestChain)}</span>`;
+      if (approx) s += ` <span class="var-price" title="ברקוד לא ייחודי (תוצרת/מאפה/כפילות) — המחיר עשוי לא להיות למוצר המדויק">מחיר משתנה</span>`;
+      else if (it.cheapestChain) s += ` <span class="cheap-at">הכי זול ב${esc(it.cheapestChain)}</span>`;
     }
     return s;
   }
@@ -98,6 +103,7 @@
       <div class="bc-head">${head}</div>
       <div class="bc-rows">${rows}</div>
       ${b.size > 1 && b.optimalTotal > 0 ? `<div class="bc-opt">💡 קנייה מפוצלת (כל פריט בזול ביותר): ${fmtShekel(b.optimalTotal)}</div>` : ''}
+      <div class="bc-note">מחיר מסניף מייצג אחד לכל רשת · ייתכן הבדל בין סניפים</div>
     </div>`;
   }
 
@@ -267,10 +273,14 @@
     if (basketItems.length) {
       breakdown = `<div class="items" style="margin-top:10px">${basketItems.map((it) => {
         const c = SP.cheapestFor(it.barcode);
+        const approx = SP.nameAmbiguous && SP.nameAmbiguous(it.barcode);
+        const tag = approx
+          ? `<span class="var-price" title="ברקוד לא ייחודי (תוצרת/מאפה/כפילות) — המחיר עשוי לא להיות למוצר המדויק">מחיר משתנה</span>`
+          : `<span class="cheap-at">הכי זול ב${esc(c.chain)}</span>`;
         return `<div class="item">
           <div class="emoji-badge ${badgeClass(it)}">${SP.itemEmoji(it)}</div>
-          <div class="item-main"><div class="item-name">${esc(it.name)}</div><div class="item-sub"><span class="cheap-at">הכי זול ב${esc(c.chain)}</span></div></div>
-          <div class="price"><div class="now">₪${c.price}</div></div>
+          <div class="item-main"><div class="item-name">${esc(it.name)}</div><div class="item-sub">${tag}</div></div>
+          <div class="price"><div class="now${approx ? ' approx' : ''}">₪${c.price}</div></div>
         </div>`;
       }).join('')}</div>`;
     } else {
