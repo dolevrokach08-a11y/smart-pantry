@@ -17,12 +17,13 @@
 // Firestore's default WebChannel transport, so we force long-polling.
 
 export const firebaseConfig = {
-  apiKey: 'REPLACE_ME',
-  authDomain: 'REPLACE_ME.firebaseapp.com',
-  projectId: 'REPLACE_ME',
-  storageBucket: 'REPLACE_ME.firebasestorage.app',
-  messagingSenderId: 'REPLACE_ME',
-  appId: 'REPLACE_ME',
+  apiKey: 'AIzaSyDwwHzo3Ho56t33vdQRV1C4KEvkS_oBNVM',
+  authDomain: 'smart-pantry-b1bb3.firebaseapp.com',
+  projectId: 'smart-pantry-b1bb3',
+  storageBucket: 'smart-pantry-b1bb3.firebasestorage.app',
+  messagingSenderId: '755046070600',
+  appId: '1:755046070600:web:4ad4414c3537175c34db7d',
+  measurementId: 'G-CN2ZD04WQC',
 };
 
 // Usernames are mapped to synthetic emails so Firebase's Email/Password
