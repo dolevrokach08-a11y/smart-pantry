@@ -1,0 +1,11 @@
+rules_version = '2';
+// Smart Pantry — each account's pantry is one document keyed by the user's uid.
+// A signed-in user can read/write ONLY their own household doc; nothing else is
+// accessible. Paste these into Firebase console → Firestore → Rules → Publish.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /households/{uid} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+  }
+}
