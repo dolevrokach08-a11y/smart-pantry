@@ -512,6 +512,38 @@
       </div>`;
   }
 
+  // Cross-device sync: simple username + password login (no email). Data syncs
+  // to the account's own doc, so any device on the same account shares a pantry.
+  function authCardHtml() {
+    const A = window.SP_auth;
+    if (!A) {
+      return `<div class="menu-item"><div class="h">☁️ סנכרון בין מכשירים</div>
+        <div class="item-sub">כדי לסנכרן את המזווה בין הטלפון, המחשב והמכשירים של המשפחה — יש להשלים הגדרת Firebase ב-<code>firebase-config.js</code> (הוראות ב-README). אחרי זה תופיע כאן התחברות עם שם משתמש וסיסמה.</div></div>`;
+    }
+    const u = A.user();
+    if (u) {
+      return `<div class="menu-item"><div class="h">☁️ סנכרון בין מכשירים</div>
+        <div class="item-sub">מחובר כ-<b>${esc(u)}</b> · המזווה מסונכרן בזמן אמת בכל מכשיר שמחובר לחשבון הזה.</div>
+        <button class="btn sm ghost" id="authLogout" style="margin-top:10px">התנתקות</button></div>`;
+    }
+    return `<div class="menu-item"><div class="h">☁️ סנכרון בין מכשירים</div>
+      <div class="item-sub">התחברו עם שם משתמש וסיסמה — כל מכשיר שמתחבר לאותו חשבון רואה את אותו מזווה. במשפחה: השתמשו באותו חשבון בכל המכשירים.</div>
+      <div class="field" style="margin-top:10px"><input type="text" id="authUser" placeholder="שם משתמש" autocomplete="username" autocapitalize="none" /></div>
+      <div class="field" style="margin-top:8px"><input type="password" id="authPass" placeholder="סיסמה (לפחות 6 תווים)" autocomplete="current-password" /></div>
+      <div class="auth-actions"><button class="btn sm" id="authLogin">התחברות</button><button class="btn sm ghost" id="authRegister">חשבון חדש</button></div>
+      <div class="item-sub auth-warn">⚠️ אין שחזור סיסמה — שמרו את הסיסמה במקום בטוח.</div></div>`;
+  }
+  // Friendly Hebrew message for a Firebase auth error.
+  function authErr(e) {
+    const c = (e && e.code) || '';
+    if (c.includes('email-already-in-use')) return 'שם המשתמש כבר תפוס — בחרו אחר או התחברו';
+    if (c.includes('invalid-credential') || c.includes('wrong-password') || c.includes('user-not-found')) return 'שם משתמש או סיסמה שגויים';
+    if (c.includes('weak-password')) return 'סיסמה קצרה מדי (לפחות 6 תווים)';
+    if (c.includes('network')) return 'אין חיבור לרשת';
+    if (c.includes('too-many-requests')) return 'יותר מדי ניסיונות — נסו שוב בעוד רגע';
+    return 'ההתחברות נכשלה — נסו שוב';
+  }
+
   // AI category settings: the user's own Anthropic key, stored only in this browser.
   function aiKeyHtml() {
     const on = SP.hasAiKey && SP.hasAiKey();
@@ -527,14 +559,12 @@
 
   function settingsSheet() {
     const s = SP.summary();
-    const fbStatus = (window.SP_cloudSave) ? 'פעיל ✓' : 'כבוי (מקומי בלבד)';
     openSheet(`
       <h2>הגדרות</h2>
       ${installHintHtml()}
       <div class="menu-item"><div class="h">📊 סטטיסטיקה</div>
         <div class="item-sub">${s.total} מוצרים במעקב · ${s.neededCount} ברשימה · ${s.expiring} לקראת תפוגה · הבית מלא ${s.fullnessPct}%</div></div>
-      <div class="menu-item"><div class="h">☁️ סנכרון בית</div>
-        <div class="item-sub">${fbStatus} — למלא את firebase-config.js כדי לסנכרן בין כל המכשירים בבית בזמן אמת.</div></div>
+      ${authCardHtml()}
       <div class="menu-item"><div class="h">💡 איך זה עובד</div>
         <div class="item-sub">לכל מוצר יש סף מינימום. כשהכמות יורדת מתחת לסף הוא קופץ אוטומטית לרשימה. המערכת לומדת את קצב הצריכה ומזכירה עוד לפני שנגמר.</div></div>
       ${storePickerHtml()}
@@ -697,6 +727,23 @@
     // settings
     if (t.id === 'resetBtn') {
       if (confirm('לאפס את כל הנתונים? פעולה זו אינה הפיכה.')) { localStorage.removeItem('smartPantry_v1'); location.reload(); }
+      return;
+    }
+    if (t.id === 'authLogin' || t.id === 'authRegister') {
+      const A = window.SP_auth; if (!A) return;
+      const u = ($('#authUser') && $('#authUser').value || '').trim();
+      const p = ($('#authPass') && $('#authPass').value) || '';
+      if (!u || !p) { toast('צריך שם משתמש וסיסמה'); return; }
+      t.disabled = true;
+      const act = t.id === 'authRegister' ? A.register : A.login;
+      act(u, p)
+        .then(() => { toast('✓ מחובר — הסנכרון פעיל'); settingsSheet(); })
+        .catch((err) => { toast(authErr(err)); t.disabled = false; });
+      return;
+    }
+    if (t.id === 'authLogout') {
+      const A = window.SP_auth; if (!A) return;
+      A.logout().then(() => { toast('התנתקת'); settingsSheet(); }).catch(() => {});
       return;
     }
     if (t.id === 'aiKeySave') {
